@@ -1,14 +1,7 @@
-import { useEffect, useMemo, useState } from 'react'
-import {
-  CartesianGrid,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import './App.css'
+
+const YearlyGraphsSection = lazy(() => import('./YearlyGraphsSection.jsx'))
 
 const STORAGE_KEY = 'financial-ledger-data-v2'
 const ALL_SUB_CATEGORY_VALUE = '__all__'
@@ -76,6 +69,7 @@ const MONTH_OPTIONS = [
   { value: '11', label: 'November' },
   { value: '12', label: 'December' },
 ]
+const YEAR_OPTIONS = Array.from({ length: 101 }, (_, index) => String(2100 - index))
 
 const today = new Date()
 const defaultYear = String(today.getFullYear())
@@ -94,6 +88,27 @@ const compactCurrency = (value) =>
     notation: 'compact',
     maximumFractionDigits: 1,
   }).format(value || 0)}`
+
+const AMOUNT_INPUT_PATTERN = /^\d*(?:\.\d{0,2})?$/
+
+const truncateText = (value, maxLength = 52) => {
+  if (!value) return ''
+  if (value.length <= maxLength) return value
+  return `${value.slice(0, maxLength - 1)}…`
+}
+
+const sanitizeAmountInput = (value) => {
+  const trimmed = value.replace(/[^\d.]/g, '')
+  const normalized = trimmed.replace(/\.(?=.*\.)/g, '')
+
+  if (!AMOUNT_INPUT_PATTERN.test(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
+const isValidAmountInput = (value) => /^\d+(?:\.\d{1,2})?$/.test(value)
 
 const formatUsDate = (isoDate) => {
   const [year, month, day] = isoDate.split('-')
@@ -207,59 +222,23 @@ const loadInitialRecords = () => {
 function App() {
   const [records, setRecords] = useState(() => loadInitialRecords())
   const [selectedYear, setSelectedYear] = useState(defaultYear)
+  const [graphYear, setGraphYear] = useState(defaultYear)
   const [selectedMonth, setSelectedMonth] = useState(defaultMonth)
   const [selectedMainCategory, setSelectedMainCategory] = useState(DEFAULT_MAIN_CATEGORY)
-  const [selectedSubCategory, setSelectedSubCategory] = useState(ALL_SUB_CATEGORY_VALUE)
-  const [entryMainCategory, setEntryMainCategory] = useState(DEFAULT_MAIN_CATEGORY)
-  const [entrySubCategory, setEntrySubCategory] = useState(getDefaultSubCategory(DEFAULT_MAIN_CATEGORY))
-  const [entryDay, setEntryDay] = useState(defaultDay)
-  const [entryAmount, setEntryAmount] = useState('')
-  const [entryNote, setEntryNote] = useState('')
   const [importError, setImportError] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
+  const [resetDialogOpen, setResetDialogOpen] = useState(false)
+  const [addDraft, setAddDraft] = useState(null)
+  const [editDraft, setEditDraft] = useState(null)
 
   useEffect(() => {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(buildBackupPayload(records)))
   }, [records])
 
-  useEffect(() => {
-    if (!isValidSubCategory(entryMainCategory, entrySubCategory)) {
-      setEntrySubCategory(getDefaultSubCategory(entryMainCategory))
-    }
-  }, [entryMainCategory, entrySubCategory])
-
-  useEffect(() => {
-    if (selectedSubCategory !== ALL_SUB_CATEGORY_VALUE && !isValidSubCategory(selectedMainCategory, selectedSubCategory)) {
-      setSelectedSubCategory(ALL_SUB_CATEGORY_VALUE)
-    }
-  }, [selectedMainCategory, selectedSubCategory])
-
-  const availableYears = useMemo(() => {
-    const years = new Set(records.map((record) => record.date.slice(0, 4)))
-    years.add(defaultYear)
-    return [...years].sort((left, right) => Number(right) - Number(left))
-  }, [records])
-
-  const formYear = selectedYear || defaultYear
-  const formDate = `${formYear}-${selectedMonth}-${entryDay}`
-  const daysInSelectedMonth = useMemo(
-    () => getDaysInMonth(formYear, selectedMonth),
-    [formYear, selectedMonth],
-  )
   const selectedMainSubCategories = useMemo(
     () => getSubCategoryOptions(selectedMainCategory),
     [selectedMainCategory],
   )
-  const entryMainSubCategories = useMemo(
-    () => getSubCategoryOptions(entryMainCategory),
-    [entryMainCategory],
-  )
-
-  useEffect(() => {
-    if (Number(entryDay) > daysInSelectedMonth) {
-      setEntryDay(String(daysInSelectedMonth).padStart(2, '0'))
-    }
-  }, [daysInSelectedMonth, entryDay])
 
   const filteredRecords = useMemo(
     () =>
@@ -267,10 +246,9 @@ function App() {
         (record) =>
           (!selectedYear || record.date.startsWith(selectedYear)) &&
           record.date.slice(5, 7) === selectedMonth &&
-          record.mainCategory === selectedMainCategory &&
-          (selectedSubCategory === ALL_SUB_CATEGORY_VALUE || record.subCategory === selectedSubCategory),
+          record.mainCategory === selectedMainCategory,
       ),
-    [records, selectedYear, selectedMonth, selectedMainCategory, selectedSubCategory],
+    [records, selectedYear, selectedMonth, selectedMainCategory],
   )
 
   const tableRows = useMemo(() => {
@@ -281,25 +259,26 @@ function App() {
       const date = `${selectedYear}-${selectedMonth}-${day}`
       const dayRecords = filteredRecords.filter((record) => record.date === date)
       const totals = Object.fromEntries(selectedMainSubCategories.map((subCategory) => [subCategory, 0]))
-      const notes = dayRecords
-        .map((record) => {
+      const noteLines = dayRecords.map((record) => {
           totals[record.subCategory] += record.amount
           return record.note
             ? `${record.subCategory}: ${currency(record.amount)} ${record.note}`
             : `${record.subCategory}: ${currency(record.amount)}`
         })
-        .join(' · ')
+      const notes = noteLines.join(' · ')
 
       return {
         date,
         totals,
+        dayRecords,
         notes,
+        notesPreview: truncateText(notes),
       }
     })
   }, [filteredRecords, selectedMainSubCategories, selectedMonth, selectedYear])
 
   const yearlyGraphs = useMemo(() => {
-    if (!selectedYear) return []
+    if (!graphYear) return []
 
     return MAIN_CATEGORY_OPTIONS.map((mainCategory) => {
       const subCategories = getSubCategoryOptions(mainCategory)
@@ -309,7 +288,7 @@ function App() {
         records.forEach((record) => {
           if (
             record.mainCategory === mainCategory &&
-            record.date.startsWith(selectedYear) &&
+            record.date.startsWith(graphYear) &&
             record.date.slice(5, 7) === month.value
           ) {
             totals[record.subCategory] += record.amount
@@ -338,11 +317,76 @@ function App() {
         yearlyTotal: Object.values(subCategoryTotals).reduce((sum, value) => sum + value, 0),
       }
     })
-  }, [records, selectedYear])
+  }, [graphYear, records])
+
+  const yearlyComparisonGraph = useMemo(() => {
+    if (!graphYear) return null
+
+    const monthlyTotals = MONTH_OPTIONS.map((month) => {
+      let income = 0
+      let expense = 0
+
+      records.forEach((record) => {
+        if (record.date.startsWith(graphYear) && record.date.slice(5, 7) === month.value) {
+          if (CATEGORY_KIND[record.mainCategory] === 'income') {
+            income += record.amount
+          } else {
+            expense += record.amount
+          }
+        }
+      })
+
+      return {
+        month: month.label.slice(0, 3),
+        Income: income,
+        Expense: expense,
+      }
+    })
+
+    return {
+      title: 'Income & Expense',
+      lines: [
+        { key: 'Income', color: '#16a34a' },
+        { key: 'Expense', color: '#dc2626' },
+      ],
+      monthlyTotals,
+      yearlyIncome: monthlyTotals.reduce((sum, item) => sum + item.Income, 0),
+      yearlyExpense: monthlyTotals.reduce((sum, item) => sum + item.Expense, 0),
+    }
+  }, [graphYear, records])
+
+  const openAddRecord = (date, subCategory) => {
+    setAddDraft({
+      date,
+      mainCategory: selectedMainCategory,
+      subCategory,
+      amount: '',
+      note: '',
+    })
+  }
+
+  const updateAddDraft = (field, value) => {
+    setAddDraft((previous) => {
+      if (!previous) return previous
+
+      if (field === 'amount') {
+        const nextAmount = sanitizeAmountInput(value)
+        if (nextAmount === null) return previous
+        return { ...previous, amount: nextAmount }
+      }
+
+      return { ...previous, [field]: value }
+    })
+  }
 
   const saveRecord = (event) => {
     event.preventDefault()
-    const amount = Number.parseFloat(entryAmount)
+    if (!addDraft || !isValidAmountInput(addDraft.amount)) {
+      setStatusMessage('Enter a valid amount with up to 2 decimal places.')
+      return
+    }
+
+    const amount = Number.parseFloat(addDraft.amount)
 
     if (!Number.isFinite(amount) || amount <= 0) {
       setStatusMessage('Enter an amount greater than 0.')
@@ -352,18 +396,18 @@ function App() {
     setRecords((previous) => [
       {
         id: crypto.randomUUID(),
-        date: formDate,
-        mainCategory: entryMainCategory,
-        subCategory: entrySubCategory,
+        date: addDraft.date,
+        mainCategory: addDraft.mainCategory,
+        subCategory: addDraft.subCategory,
         amount,
-        note: entryNote.trim(),
+        note: addDraft.note.trim(),
       },
       ...previous,
     ])
 
-    setEntryAmount('')
-    setEntryNote('')
-    setStatusMessage(`${entryMainCategory} / ${entrySubCategory} record saved locally.`)
+    setAddDraft(null)
+    setStatusMessage(`${addDraft.mainCategory} / ${addDraft.subCategory} record saved locally.`)
+    setImportError('')
   }
 
   const exportData = () => {
@@ -376,6 +420,86 @@ function App() {
     anchor.click()
     URL.revokeObjectURL(url)
     setStatusMessage('Backup exported.')
+  }
+
+  const deleteRecord = (recordId) => {
+    setRecords((previous) => previous.filter((record) => record.id !== recordId))
+    setStatusMessage('Record deleted.')
+    setImportError('')
+  }
+
+  const resetData = () => {
+    if (!records.length) {
+      setStatusMessage('No data to reset.')
+      setImportError('')
+      return
+    }
+
+    setResetDialogOpen(true)
+  }
+
+  const confirmResetData = () => {
+    setRecords([])
+    setResetDialogOpen(false)
+    setStatusMessage('All data reset.')
+    setImportError('')
+  }
+
+  const openEditRecord = (record) => {
+    setEditDraft({
+      id: record.id,
+      date: record.date,
+      mainCategory: record.mainCategory,
+      subCategory: record.subCategory,
+      amount: record.amount.toFixed(2),
+      note: record.note,
+    })
+  }
+
+  const updateEditDraft = (field, value) => {
+    setEditDraft((previous) => {
+      if (!previous) return previous
+
+      if (field === 'amount') {
+        const nextAmount = sanitizeAmountInput(value)
+        if (nextAmount === null) return previous
+        return { ...previous, amount: nextAmount }
+      }
+
+      return { ...previous, [field]: value }
+    })
+  }
+
+  const saveEditedRecord = (event) => {
+    event.preventDefault()
+    if (!editDraft) return
+
+    if (!isValidAmountInput(editDraft.amount)) {
+      setStatusMessage('Enter a valid edited amount with up to 2 decimal places.')
+      return
+    }
+
+    const amount = Number.parseFloat(editDraft.amount)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setStatusMessage('Enter an amount greater than 0.')
+      return
+    }
+
+    setRecords((previous) =>
+      previous.map((record) =>
+        record.id === editDraft.id
+          ? {
+              ...record,
+              amount,
+              note: editDraft.note.trim(),
+            }
+          : record,
+      ),
+    )
+
+    setEditDraft(null)
+    setStatusMessage('Record updated.')
+    setImportError('')
   }
 
   const importData = (event) => {
@@ -424,26 +548,52 @@ function App() {
           <label className="secondary import-label" htmlFor="import-backup">
             Import data
           </label>
+          <button type="button" className="secondary" onClick={resetData}>
+            Reset
+          </button>
           <input id="import-backup" type="file" accept="application/json" onChange={importData} />
         </div>
       </section>
 
-      <section className="filters card">
+      {graphYear ? (
+        <Suspense
+          fallback={
+            <section className="card graph-section graph-loading">
+              <div className="section-heading">
+                <div>
+                  <p className="section-label">Yearly graphs</p>
+                </div>
+              </div>
+              <p className="status-text">Loading yearly graphs...</p>
+            </section>
+          }
+        >
+          <YearlyGraphsSection
+            yearlyGraphs={yearlyGraphs}
+            comparisonGraph={yearlyComparisonGraph}
+            selectedYear={graphYear}
+            onYearChange={setGraphYear}
+            yearOptions={YEAR_OPTIONS}
+            currency={currency}
+            compactCurrency={compactCurrency}
+            getSubCategoryColor={getSubCategoryColor}
+          />
+        </Suspense>
+      ) : null}
+
+      <article className="card table-card">
         <div className="section-heading">
           <div>
-            <p className="section-label">Filters</p>
-            <h2>Year / Month / Main / Sub</h2>
+            <p className="section-label">Monthly table</p>
           </div>
-          <span className={`type-pill ${CATEGORY_KIND[selectedMainCategory]}`}>
-            {CATEGORY_KIND[selectedMainCategory]}
-          </span>
         </div>
-        <div className="filter-grid">
+
+        <div className="table-controls">
           <label>
             Year
             <select value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)}>
               <option value="">Select year</option>
-              {availableYears.map((year) => (
+              {YEAR_OPTIONS.map((year) => (
                 <option key={year} value={year}>
                   {year}
                 </option>
@@ -470,102 +620,6 @@ function App() {
               ))}
             </select>
           </label>
-          <label>
-            Sub-Category
-            <select value={selectedSubCategory} onChange={(event) => setSelectedSubCategory(event.target.value)}>
-              <option value={ALL_SUB_CATEGORY_VALUE}>All sub-categories</option>
-              {selectedMainSubCategories.map((subCategory) => (
-                <option key={subCategory} value={subCategory}>
-                  {subCategory}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
-      </section>
-
-      <article className="card form-card">
-        <div className="section-heading">
-          <div>
-            <p className="section-label">Add record</p>
-            <h2>Save a new transaction</h2>
-          </div>
-        </div>
-        <form className="entry-form" onSubmit={saveRecord}>
-          <label>
-            Main-Category
-            <select value={entryMainCategory} onChange={(event) => setEntryMainCategory(event.target.value)}>
-              {MAIN_CATEGORY_OPTIONS.map((mainCategory) => (
-                <option key={mainCategory} value={mainCategory}>
-                  {mainCategory}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Sub-Category
-            <select value={entrySubCategory} onChange={(event) => setEntrySubCategory(event.target.value)}>
-              {entryMainSubCategories.map((subCategory) => (
-                <option key={subCategory} value={subCategory}>
-                  {subCategory}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Day
-            <select value={entryDay} onChange={(event) => setEntryDay(event.target.value)}>
-              {Array.from({ length: daysInSelectedMonth }, (_, index) => {
-                const value = String(index + 1).padStart(2, '0')
-                return (
-                  <option key={value} value={value}>
-                    {value}
-                  </option>
-                )
-              })}
-            </select>
-          </label>
-          <label>
-            Amount
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={entryAmount}
-              onChange={(event) => setEntryAmount(event.target.value)}
-              placeholder="0.00"
-              required
-            />
-          </label>
-          <label className="entry-note-field">
-            Note
-            <input
-              type="text"
-              value={entryNote}
-              onChange={(event) => setEntryNote(event.target.value)}
-              placeholder="What was this about?"
-            />
-          </label>
-          <div className="form-meta">
-            <span>{formatUsDate(formDate)}</span>
-            <span>{`${entryMainCategory} / ${entrySubCategory}`}</span>
-          </div>
-          <button type="submit" className="primary">
-            Add record
-          </button>
-        </form>
-      </article>
-
-      <article className="card table-card">
-        <div className="section-heading">
-          <div>
-            <p className="section-label">Monthly table</p>
-            <h2>
-              {selectedYear
-                ? `${selectedMainCategory}${selectedSubCategory === ALL_SUB_CATEGORY_VALUE ? '' : ` / ${selectedSubCategory}`} in ${selectedYear}/${selectedMonth}`
-                : 'Select a year to view the table'}
-            </h2>
-          </div>
         </div>
 
         {selectedYear ? (
@@ -586,11 +640,70 @@ function App() {
                     <td>{formatUsDate(row.date)}</td>
                     {selectedMainSubCategories.map((subCategory) => (
                       <td key={subCategory} className="amount-cell">
-                        {currency(row.totals[subCategory])}
+                        <button
+                          type="button"
+                          className="amount-cell-button"
+                          onClick={() => openAddRecord(row.date, subCategory)}
+                          aria-label={`Add ${subCategory} record on ${formatUsDate(row.date)}`}
+                        >
+                          {currency(row.totals[subCategory])}
+                        </button>
                       </td>
                     ))}
-                    <td className="notes-cell" title={row.notes || 'No notes'}>
-                      <span>{row.notes || '—'}</span>
+                    <td className="notes-cell">
+                      {row.dayRecords.length ? (
+                        <div className="notes-popover">
+                          <button
+                            type="button"
+                            className="notes-icon-button"
+                            title={`View ${row.dayRecords.length} record detail${row.dayRecords.length === 1 ? '' : 's'}`}
+                            aria-label={`Show ${row.dayRecords.length} record details for ${formatUsDate(row.date)}`}
+                          >
+                            <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                              <path
+                                d="M10.5 4a6.5 6.5 0 1 0 4.143 11.509l4.174 4.174 1.414-1.414-4.174-4.174A6.5 6.5 0 0 0 10.5 4Zm0 2a4.5 4.5 0 1 1 0 9 4.5 4.5 0 0 1 0-9Z"
+                                fill="currentColor"
+                              />
+                            </svg>
+                            <span>{row.dayRecords.length}</span>
+                          </button>
+                          <div className="notes-details" role="tooltip">
+                            <div className="notes-details-header">
+                              <strong>{formatUsDate(row.date)}</strong>
+                              <span>{row.dayRecords.length} record{row.dayRecords.length === 1 ? '' : 's'}</span>
+                            </div>
+                            <ul className="notes-record-list">
+                              {row.dayRecords.map((record) => (
+                                <li key={record.id} className="notes-record-item">
+                                  <div className="notes-record-copy">
+                                    <strong>{record.subCategory}</strong>
+                                    <span>{currency(record.amount)}</span>
+                                    <span>{record.note || 'No note'}</span>
+                                  </div>
+                                  <div className="notes-record-actions">
+                                    <button
+                                      type="button"
+                                      className="notes-edit"
+                                      onClick={() => openEditRecord(record)}
+                                    >
+                                      Edit
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="notes-delete"
+                                      onClick={() => deleteRecord(record.id)}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="notes-preview notes-empty">—</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -602,92 +715,136 @@ function App() {
         )}
       </article>
 
-      {selectedYear ? (
-        <section className="card graph-section">
-          <div className="section-heading graph-heading">
-            <div>
-              <p className="section-label">Yearly graphs</p>
-              <h2>Monthly sub-category totals for every main-category in {selectedYear}</h2>
-              <p className="graph-hint">Scroll sideways to browse all main-categories.</p>
-            </div>
-          </div>
-          <div className="graph-scroller">
-            <div className="graph-strip" role="list" aria-label={`Main-category graphs for ${selectedYear}`}>
-              {yearlyGraphs.map((graph) => (
-                <CategoryGraph key={graph.mainCategory} graph={graph} />
-              ))}
-            </div>
-          </div>
-        </section>
-      ) : null}
-
       {(importError || statusMessage) && (
         <section className="feedback-row">
           {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
           {importError ? <p className="error-text">{importError}</p> : null}
         </section>
       )}
+
+      {resetDialogOpen ? (
+        <ModalShell title="Reset all data" onClose={() => setResetDialogOpen(false)}>
+          <p className="modal-copy">This will delete all imported and locally saved records.</p>
+          <div className="modal-actions">
+            <button type="button" className="secondary" onClick={() => setResetDialogOpen(false)}>
+              Cancel
+            </button>
+            <button type="button" className="primary" onClick={confirmResetData}>
+              Reset all data
+            </button>
+          </div>
+        </ModalShell>
+      ) : null}
+
+      {addDraft ? (
+        <ModalShell title="Add record" onClose={() => setAddDraft(null)}>
+          <form className="edit-form" onSubmit={saveRecord}>
+            <div className="record-meta-grid">
+              <div className="record-meta-card">
+                <span className="record-meta-label">Date</span>
+                <strong>{formatUsDate(addDraft.date)}</strong>
+              </div>
+              <div className="record-meta-card">
+                <span className="record-meta-label">Category</span>
+                <strong>{`${addDraft.mainCategory} / ${addDraft.subCategory}`}</strong>
+              </div>
+            </div>
+            <label>
+              Amount
+              <input
+                type="text"
+                inputMode="decimal"
+                value={addDraft.amount}
+                onChange={(event) => updateAddDraft('amount', event.target.value)}
+                placeholder="0.00"
+                required
+              />
+            </label>
+            <label className="edit-note-field">
+              Note
+              <input
+                type="text"
+                value={addDraft.note}
+                onChange={(event) => updateAddDraft('note', event.target.value)}
+                placeholder="What was this about?"
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setAddDraft(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="primary">
+                Save record
+              </button>
+            </div>
+          </form>
+        </ModalShell>
+      ) : null}
+
+      {editDraft ? (
+        <ModalShell title="Edit record" onClose={() => setEditDraft(null)}>
+          <form className="edit-form" onSubmit={saveEditedRecord}>
+            <div className="record-meta-grid">
+              <div className="record-meta-card">
+                <span className="record-meta-label">Date</span>
+                <strong>{formatUsDate(editDraft.date)}</strong>
+              </div>
+              <div className="record-meta-card">
+                <span className="record-meta-label">Category</span>
+                <strong>{`${editDraft.mainCategory} / ${editDraft.subCategory}`}</strong>
+              </div>
+            </div>
+            <label>
+              Amount
+              <input
+                type="text"
+                inputMode="decimal"
+                value={editDraft.amount}
+                onChange={(event) => updateEditDraft('amount', event.target.value)}
+                placeholder="0.00"
+                required
+              />
+            </label>
+            <label className="edit-note-field">
+              Note
+              <input
+                type="text"
+                value={editDraft.note}
+                onChange={(event) => updateEditDraft('note', event.target.value)}
+                placeholder="What was this about?"
+              />
+            </label>
+            <div className="modal-actions">
+              <button type="button" className="secondary" onClick={() => setEditDraft(null)}>
+                Cancel
+              </button>
+              <button type="submit" className="primary">
+                Save changes
+              </button>
+            </div>
+          </form>
+        </ModalShell>
+      ) : null}
     </main>
   )
 }
 
-function CategoryGraph({ graph }) {
+function ModalShell({ title, children, onClose }) {
   return (
-    <article className="graph-card" role="listitem">
-      <div className="graph-header">
-        <div>
-          <h3>{graph.mainCategory}</h3>
-          <p>{currency(graph.yearlyTotal)}</p>
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <section
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="modal-header">
+          <h3>{title}</h3>
         </div>
-        <span className={`type-pill ${graph.type}`}>{graph.type}</span>
-      </div>
-
-      <div className="graph-legend" aria-label={`${graph.mainCategory} sub-categories`}>
-        {graph.subCategories.map((subCategory, index) => (
-          <span key={subCategory} className="legend-chip">
-            <span
-              className="legend-swatch"
-              style={{ backgroundColor: getSubCategoryColor(graph.mainCategory, index) }}
-              aria-hidden="true"
-            />
-            {subCategory}
-          </span>
-        ))}
-      </div>
-
-      <div className="chart-wrap" aria-label={`${graph.mainCategory} monthly sub-category totals`}>
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={graph.monthlyTotals} margin={{ top: 8, right: 8, left: -18, bottom: 4 }}>
-            <CartesianGrid stroke="rgba(148, 163, 184, 0.2)" strokeDasharray="4 4" />
-            <XAxis
-              dataKey="month"
-              tickLine={false}
-              axisLine={false}
-              tick={{ fill: '#64748b', fontSize: 11 }}
-            />
-            <YAxis
-              tickFormatter={compactCurrency}
-              tickLine={false}
-              axisLine={false}
-              width={42}
-              tick={{ fill: '#64748b', fontSize: 11 }}
-            />
-            <Tooltip formatter={(value, name) => [currency(Number(value)), name]} />
-            {graph.subCategories.map((subCategory, index) => (
-              <Line
-                key={subCategory}
-                type="monotone"
-                dataKey={subCategory}
-                stroke={getSubCategoryColor(graph.mainCategory, index)}
-                strokeWidth={2.5}
-                dot={{ r: 2.5, fill: getSubCategoryColor(graph.mainCategory, index), strokeWidth: 0 }}
-                activeDot={{ r: 4 }}
-              />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </article>
+        {children}
+      </section>
+    </div>
   )
 }
 
