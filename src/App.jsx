@@ -1,28 +1,46 @@
 import { useEffect, useMemo, useState } from 'react'
 import './App.css'
 
-const STORAGE_KEY = 'financial-ledger-data-v1'
-
-const CATEGORY_OPTIONS = {
-  expense: {
-    House: ['Loan', 'GA Power', 'Water', 'Internet', 'Gas', 'Subscription', 'Etc'],
-    Car: ['Loan', 'Insurance', 'Gas', 'Etc'],
-    Eat: ['Mart', 'Eat Out', 'Dessert'],
-    Shopping: ['Wearing', 'House', 'Entertain', 'Etc'],
-    Subscription: ['Phone', 'Entertain', 'Etc'],
-    Entertain: ['Sports', 'Events', 'Park&Game', 'Parking', 'Etc'],
-    Trip: ['Hotel', 'Flight', 'Car', 'Eat', 'Entertain', 'Etc'],
-    Health: ['Hospital', 'Dental', 'Medicine', 'Gym', 'Etc'],
-    Etc: ['Gift', 'Etc'],
-  },
-  income: {
-    Income: ['Salary', 'Bonus', 'Tax Return', 'Cash Back', 'Etc'],
-  },
+const STORAGE_KEY = 'financial-ledger-data-v2'
+const CATEGORY_OPTIONS = [
+  'Housing',
+  'Shopping',
+  'Health',
+  'Vehicle',
+  'Subscriptions',
+  'Entertainment',
+  'Trip',
+  'Income',
+]
+const CATEGORY_KIND = {
+  Housing: 'expense',
+  Shopping: 'expense',
+  Health: 'expense',
+  Vehicle: 'expense',
+  Subscriptions: 'expense',
+  Entertainment: 'expense',
+  Trip: 'expense',
+  Income: 'income',
 }
+const MONTH_OPTIONS = [
+  { value: '01', label: 'January' },
+  { value: '02', label: 'February' },
+  { value: '03', label: 'March' },
+  { value: '04', label: 'April' },
+  { value: '05', label: 'May' },
+  { value: '06', label: 'June' },
+  { value: '07', label: 'July' },
+  { value: '08', label: 'August' },
+  { value: '09', label: 'September' },
+  { value: '10', label: 'October' },
+  { value: '11', label: 'November' },
+  { value: '12', label: 'December' },
+]
 
-const TODAY = new Date().toISOString().slice(0, 10)
-const THIS_MONTH = TODAY.slice(0, 7)
-const THIS_YEAR = TODAY.slice(0, 4)
+const today = new Date()
+const defaultYear = String(today.getFullYear())
+const defaultMonth = String(today.getMonth() + 1).padStart(2, '0')
+const defaultDay = String(today.getDate()).padStart(2, '0')
 
 const currency = (value) =>
   new Intl.NumberFormat('en-US', {
@@ -31,519 +49,475 @@ const currency = (value) =>
     maximumFractionDigits: 2,
   }).format(value || 0)
 
-const toNumber = (value) => Number.parseFloat(value || 0) || 0
+const formatUsDate = (isoDate) => {
+  const [year, month, day] = isoDate.split('-')
+  return `${month}/${day}/${year}`
+}
 
-const loadInitialData = () => {
+const getDaysInMonth = (year, month) => new Date(Number(year), Number(month), 0).getDate()
+
+const buildBackupPayload = (records) => ({
+  version: 1,
+  exportedAt: new Date().toISOString(),
+  records: records.map((record) => [record.id, record.date, record.category, record.amount, record.note]),
+})
+
+const normalizeRecord = (record) => {
+  const source = Array.isArray(record)
+    ? {
+        id: record[0],
+        date: record[1],
+        category: record[2],
+        amount: record[3],
+        note: record[4],
+      }
+    : record
+
+  if (!source || typeof source !== 'object') return null
+  if (typeof source.date !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(source.date)) return null
+  if (!CATEGORY_OPTIONS.includes(source.category)) return null
+
+  const amount = Number.parseFloat(source.amount)
+  if (!Number.isFinite(amount) || amount <= 0) return null
+
+  return {
+    id: typeof source.id === 'string' && source.id ? source.id : crypto.randomUUID(),
+    date: source.date,
+    category: source.category,
+    amount,
+    note: typeof source.note === 'string' ? source.note.trim() : '',
+  }
+}
+
+const parseRecords = (payload) => {
+  if (!payload || typeof payload !== 'object' || !Array.isArray(payload.records)) {
+    return []
+  }
+
+  return payload.records.map(normalizeRecord).filter(Boolean)
+}
+
+const loadInitialRecords = () => {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    if (!saved) {
-      return {
-        entries: [],
-        budgets: {},
-        plans: [],
-      }
-    }
-
-    const parsed = JSON.parse(saved)
-    return {
-      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
-      budgets: parsed.budgets && typeof parsed.budgets === 'object' ? parsed.budgets : {},
-      plans: Array.isArray(parsed.plans) ? parsed.plans : [],
-    }
+    if (!saved) return []
+    return parseRecords(JSON.parse(saved))
   } catch {
-    return {
-      entries: [],
-      budgets: {},
-      plans: [],
-    }
+    return []
   }
 }
 
 function App() {
-  const [initialData] = useState(() => loadInitialData())
-  const [entries, setEntries] = useState(initialData.entries)
-  const [budgets, setBudgets] = useState(initialData.budgets)
-  const [plans, setPlans] = useState(initialData.plans)
-
-  const [entryForm, setEntryForm] = useState({
-    date: TODAY,
-    type: 'expense',
-    category: 'House',
-    subcategory: 'Loan',
-    amount: '',
-    description: '',
-  })
-
-  const [planForm, setPlanForm] = useState({
-    month: THIS_MONTH,
-    plannedIncome: '',
-    plannedExpense: '',
-    note: '',
-  })
-
-  const [selectedMonth, setSelectedMonth] = useState(THIS_MONTH)
-  const [selectedYear, setSelectedYear] = useState(THIS_YEAR)
+  const [records, setRecords] = useState(() => loadInitialRecords())
+  const [selectedYear, setSelectedYear] = useState(defaultYear)
+  const [selectedMonth, setSelectedMonth] = useState(defaultMonth)
+  const [selectedCategory, setSelectedCategory] = useState('Housing')
+  const [entryDay, setEntryDay] = useState(defaultDay)
+  const [entryAmount, setEntryAmount] = useState('')
+  const [entryNote, setEntryNote] = useState('')
   const [importError, setImportError] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
 
   useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify({
-        entries,
-        budgets,
-        plans,
-      }),
-    )
-  }, [entries, budgets, plans])
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(buildBackupPayload(records)))
+  }, [records])
 
-  const typeCategories = useMemo(() => CATEGORY_OPTIONS[entryForm.type], [entryForm.type])
-  const categoryNames = useMemo(() => Object.keys(typeCategories), [typeCategories])
-  const selectedCategory = categoryNames.includes(entryForm.category)
-    ? entryForm.category
-    : categoryNames[0]
-  const subcategoryNames = useMemo(
-    () => typeCategories[selectedCategory] || [],
-    [typeCategories, selectedCategory],
-  )
-  const selectedSubcategory = subcategoryNames.includes(entryForm.subcategory)
-    ? entryForm.subcategory
-    : subcategoryNames[0]
+  const availableYears = useMemo(() => {
+    const years = new Set(records.map((record) => record.date.slice(0, 4)))
+    years.add(defaultYear)
+    return [...years].sort((left, right) => Number(right) - Number(left))
+  }, [records])
 
-  const entriesForMonth = useMemo(
-    () => entries.filter((entry) => entry.date.startsWith(selectedMonth)),
-    [entries, selectedMonth],
+  const formYear = selectedYear || defaultYear
+  const formDate = `${formYear}-${selectedMonth}-${entryDay}`
+  const daysInSelectedMonth = useMemo(
+    () => getDaysInMonth(formYear, selectedMonth),
+    [formYear, selectedMonth],
   )
 
-  const entriesForYear = useMemo(
-    () => entries.filter((entry) => entry.date.startsWith(selectedYear)),
-    [entries, selectedYear],
-  )
+  useEffect(() => {
+    if (Number(entryDay) > daysInSelectedMonth) {
+      setEntryDay(String(daysInSelectedMonth).padStart(2, '0'))
+    }
+  }, [daysInSelectedMonth, entryDay])
 
-  const summaryFor = (records) =>
-    records.reduce(
-      (acc, item) => {
-        if (item.type === 'income') {
-          acc.income += item.amount
-        } else {
-          acc.expense += item.amount
-        }
-        return acc
-      },
-      { income: 0, expense: 0 },
-    )
-
-  const daySummary = useMemo(() => {
-    const todayRecords = entries.filter((entry) => entry.date === entryForm.date)
-    return summaryFor(todayRecords)
-  }, [entries, entryForm.date])
-
-  const monthSummary = useMemo(() => summaryFor(entriesForMonth), [entriesForMonth])
-  const yearSummary = useMemo(() => summaryFor(entriesForYear), [entriesForYear])
-
-  const monthlyCategoryTotals = useMemo(() => {
-    const totals = {}
-    entriesForMonth.forEach((entry) => {
-      totals[entry.category] = (totals[entry.category] || 0) + entry.amount
-    })
-    return totals
-  }, [entriesForMonth])
-
-  const yearlyCategoryTotals = useMemo(() => {
-    const totals = {}
-    entriesForYear.forEach((entry) => {
-      totals[entry.category] = (totals[entry.category] || 0) + entry.amount
-    })
-    return totals
-  }, [entriesForYear])
-
-  const monthBudget = toNumber(budgets[selectedMonth])
-  const spentInMonth = monthSummary.expense
-  const budgetProgress = monthBudget > 0 ? Math.min((spentInMonth / monthBudget) * 100, 100) : 0
-
-  const plannedTotals = useMemo(
+  const filteredRecords = useMemo(
     () =>
-      plans.reduce(
-        (acc, item) => {
-          acc.income += item.plannedIncome
-          acc.expense += item.plannedExpense
-          return acc
-        },
-        { income: 0, expense: 0 },
+      records.filter(
+        (record) =>
+          (!selectedYear || record.date.startsWith(selectedYear)) &&
+          record.date.slice(5, 7) === selectedMonth &&
+          record.category === selectedCategory,
       ),
-    [plans],
+    [records, selectedYear, selectedMonth, selectedCategory],
   )
 
-  const monthlyPlan = useMemo(
-    () => plans.find((plan) => plan.month === selectedMonth),
-    [plans, selectedMonth],
+  const selectedMonthTotal = useMemo(
+    () => filteredRecords.reduce((total, record) => total + record.amount, 0),
+    [filteredRecords],
   )
 
-  const saveEntry = (event) => {
-    event.preventDefault()
-    const amount = toNumber(entryForm.amount)
-    if (!amount || amount <= 0) return
+  const selectedYearTotal = useMemo(() => {
+    if (!selectedYear) return 0
+    return records.reduce((total, record) => {
+      if (record.date.startsWith(selectedYear) && record.category === selectedCategory) {
+        return total + record.amount
+      }
+      return total
+    }, 0)
+  }, [records, selectedCategory, selectedYear])
 
-    setEntries((prev) => [
-      {
-        id: crypto.randomUUID(),
-        ...entryForm,
-        category: selectedCategory,
-        subcategory: selectedSubcategory,
+  const latestRecord = records[0] || null
+
+  const tableRows = useMemo(() => {
+    if (!selectedYear) return []
+
+    return Array.from({ length: getDaysInMonth(selectedYear, selectedMonth) }, (_, index) => {
+      const day = String(index + 1).padStart(2, '0')
+      const date = `${selectedYear}-${selectedMonth}-${day}`
+      const dayRecords = filteredRecords.filter((record) => record.date === date)
+      const amount = dayRecords.reduce((total, record) => total + record.amount, 0)
+      const notes = dayRecords
+        .map((record) => (record.note ? `${currency(record.amount)} ${record.note}` : currency(record.amount)))
+        .join(' · ')
+
+      return {
+        date,
         amount,
-        createdAt: new Date().toISOString(),
-      },
-      ...prev,
-    ])
+        notes,
+      }
+    })
+  }, [filteredRecords, selectedMonth, selectedYear])
 
-    setEntryForm((prev) => ({
-      ...prev,
-      amount: '',
-      description: '',
-    }))
-  }
+  const yearlyGraphs = useMemo(() => {
+    if (!selectedYear) return []
 
-  const saveBudget = (value) => {
-    setBudgets((prev) => ({
-      ...prev,
-      [selectedMonth]: value,
-    }))
-  }
+    return CATEGORY_OPTIONS.map((category) => {
+      const monthlyTotals = MONTH_OPTIONS.map((month) => {
+        const total = records.reduce((sum, record) => {
+          if (
+            record.category === category &&
+            record.date.startsWith(selectedYear) &&
+            record.date.slice(5, 7) === month.value
+          ) {
+            return sum + record.amount
+          }
+          return sum
+        }, 0)
 
-  const savePlan = (event) => {
+        return {
+          month: month.label.slice(0, 3),
+          total,
+        }
+      })
+
+      return {
+        category,
+        type: CATEGORY_KIND[category],
+        monthlyTotals,
+        yearlyTotal: monthlyTotals.reduce((sum, item) => sum + item.total, 0),
+      }
+    })
+  }, [records, selectedYear])
+
+  const saveRecord = (event) => {
     event.preventDefault()
-    const payload = {
-      month: planForm.month,
-      plannedIncome: toNumber(planForm.plannedIncome),
-      plannedExpense: toNumber(planForm.plannedExpense),
-      note: planForm.note.trim(),
+    const amount = Number.parseFloat(entryAmount)
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      setStatusMessage('Enter an amount greater than 0.')
+      return
     }
 
-    setPlans((prev) => {
-      const existingIndex = prev.findIndex((item) => item.month === payload.month)
-      if (existingIndex === -1) return [payload, ...prev]
-      const next = [...prev]
-      next[existingIndex] = payload
-      return next
-    })
+    setRecords((previous) => [
+      {
+        id: crypto.randomUUID(),
+        date: formDate,
+        category: selectedCategory,
+        amount,
+        note: entryNote.trim(),
+      },
+      ...previous,
+    ])
+
+    setEntryAmount('')
+    setEntryNote('')
+    setStatusMessage('Record saved locally.')
   }
 
   const exportData = () => {
-    const blob = new Blob([JSON.stringify({ entries, budgets, plans }, null, 2)], {
-      type: 'application/json',
-    })
+    const payload = buildBackupPayload(records)
+    const blob = new Blob([JSON.stringify(payload)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
     anchor.download = `financial-ledger-${Date.now()}.json`
     anchor.click()
     URL.revokeObjectURL(url)
+    setStatusMessage('Backup exported.')
   }
 
   const importData = (event) => {
     const file = event.target.files?.[0]
     setImportError('')
+    setStatusMessage('')
+
     if (!file) return
 
     const reader = new FileReader()
     reader.onload = () => {
       try {
         const parsed = JSON.parse(String(reader.result || '{}'))
-        setEntries(Array.isArray(parsed.entries) ? parsed.entries : [])
-        setBudgets(parsed.budgets && typeof parsed.budgets === 'object' ? parsed.budgets : {})
-        setPlans(Array.isArray(parsed.plans) ? parsed.plans : [])
+        const nextRecords = parseRecords(parsed)
+
+        if (!Array.isArray(parsed.records)) {
+          throw new Error('invalid')
+        }
+
+        setRecords(nextRecords)
+        setStatusMessage(`Imported ${nextRecords.length} record${nextRecords.length === 1 ? '' : 's'}.`)
       } catch {
-        setImportError('Invalid JSON file. Please import a valid backup file.')
+        setImportError('Import failed. Please use a valid financial-ledger backup file.')
       }
     }
+
     reader.readAsText(file)
     event.target.value = ''
   }
 
-  const recentEntries = useMemo(() => entries.slice(0, 15), [entries])
-
   return (
     <main className="app-shell">
-      <header className="top-header">
+      <section className="hero card">
         <div>
-          <h1>My Financial Ledger</h1>
-          <p>Track daily, monthly, yearly income and expenses with categories, plans, and budgets.</p>
+          <p className="eyebrow">Personal finance ledger</p>
+          <h1>Simple, modern money tracking for your own monthly flow.</h1>
+          <p className="hero-copy">
+            Pick a year, month, and category to review your history, then add one record at a time and keep
+            everything backed up locally.
+          </p>
         </div>
-        <div className="storage-actions">
-          <button type="button" onClick={exportData}>Export JSON</button>
-          <label className="import-label" htmlFor="import-json">Import JSON</label>
-          <input id="import-json" type="file" accept="application/json" onChange={importData} />
+        <div className="hero-actions">
+          <button type="button" className="primary" onClick={exportData}>
+            Export data
+          </button>
+          <label className="secondary import-label" htmlFor="import-backup">
+            Import data
+          </label>
+          <input id="import-backup" type="file" accept="application/json" onChange={importData} />
         </div>
-      </header>
+      </section>
 
-      {importError && <p className="error-text">{importError}</p>}
-
-      <section className="card">
-        <h2>Add Entry</h2>
-        <form className="form-grid" onSubmit={saveEntry}>
+      <section className="filters card">
+        <div className="section-heading">
+          <div>
+            <p className="section-label">Filters</p>
+            <h2>Year / Month / Category</h2>
+          </div>
+          <span className={`type-pill ${CATEGORY_KIND[selectedCategory]}`}>{CATEGORY_KIND[selectedCategory]}</span>
+        </div>
+        <div className="filter-grid">
           <label>
-            Date
-            <input
-              type="date"
-              value={entryForm.date}
-              onChange={(event) => setEntryForm((prev) => ({ ...prev, date: event.target.value }))}
-              required
-            />
+            Year
+            <select value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)}>
+              <option value="">Select year</option>
+              {availableYears.map((year) => (
+                <option key={year} value={year}>
+                  {year}
+                </option>
+              ))}
+            </select>
           </label>
           <label>
-            Type
-            <select
-              value={entryForm.type}
-              onChange={(event) => {
-                const type = event.target.value
-                const firstCategory = Object.keys(CATEGORY_OPTIONS[type])[0]
-                const firstSubcategory = CATEGORY_OPTIONS[type][firstCategory][0]
-                setEntryForm((prev) => ({
-                  ...prev,
-                  type,
-                  category: firstCategory,
-                  subcategory: firstSubcategory,
-                }))
-              }}
-            >
-              <option value="expense">Expense</option>
-              <option value="income">Income</option>
+            Month
+            <select value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)}>
+              {MONTH_OPTIONS.map((month) => (
+                <option key={month.value} value={month.value}>
+                  {month.label}
+                </option>
+              ))}
             </select>
           </label>
           <label>
             Category
-            <select
-              value={selectedCategory}
-              onChange={(event) => {
-                const category = event.target.value
-                setEntryForm((prev) => ({
-                  ...prev,
-                  category,
-                  subcategory: typeCategories[category][0],
-                }))
-              }}
-            >
-              {categoryNames.map((name) => (
-                <option key={name} value={name}>{name}</option>
+            <select value={selectedCategory} onChange={(event) => setSelectedCategory(event.target.value)}>
+              {CATEGORY_OPTIONS.map((category) => (
+                <option key={category} value={category}>
+                  {category}
+                </option>
               ))}
             </select>
           </label>
-          <label>
-            Subcategory
-            <select
-              value={selectedSubcategory}
-              onChange={(event) => setEntryForm((prev) => ({ ...prev, subcategory: event.target.value }))}
-            >
-              {subcategoryNames.map((name) => (
-                <option key={name} value={name}>{name}</option>
-              ))}
-            </select>
-          </label>
-          <label>
-            Amount
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={entryForm.amount}
-              onChange={(event) => setEntryForm((prev) => ({ ...prev, amount: event.target.value }))}
-              placeholder="0.00"
-              required
-            />
-          </label>
-          <label className="wide">
-            Description
-            <input
-              type="text"
-              value={entryForm.description}
-              onChange={(event) => setEntryForm((prev) => ({ ...prev, description: event.target.value }))}
-              placeholder="What was this for?"
-            />
-          </label>
-          <button type="submit" className="primary">Save Entry</button>
-        </form>
-      </section>
-
-      <section className="card controls-grid">
-        <label>
-          Month view
-          <input type="month" value={selectedMonth} onChange={(event) => setSelectedMonth(event.target.value)} />
-        </label>
-        <label>
-          Year view
-          <input type="number" min="2000" max="2100" value={selectedYear} onChange={(event) => setSelectedYear(event.target.value)} />
-        </label>
-        <label>
-          Monthly budget
-          <input
-            type="number"
-            min="0"
-            step="0.01"
-            value={budgets[selectedMonth] || ''}
-            onChange={(event) => saveBudget(event.target.value)}
-            placeholder="Set budget"
-          />
-        </label>
-      </section>
-
-      <section className="stats-grid">
-        <article className="card stat">
-          <h3>Daily ({entryForm.date})</h3>
-          <p>Income: {currency(daySummary.income)}</p>
-          <p>Expense: {currency(daySummary.expense)}</p>
-          <p>Balance: {currency(daySummary.income - daySummary.expense)}</p>
-        </article>
-        <article className="card stat">
-          <h3>Monthly ({selectedMonth})</h3>
-          <p>Income: {currency(monthSummary.income)}</p>
-          <p>Expense: {currency(monthSummary.expense)}</p>
-          <p>Balance: {currency(monthSummary.income - monthSummary.expense)}</p>
-        </article>
-        <article className="card stat">
-          <h3>Yearly ({selectedYear})</h3>
-          <p>Income: {currency(yearSummary.income)}</p>
-          <p>Expense: {currency(yearSummary.expense)}</p>
-          <p>Balance: {currency(yearSummary.income - yearSummary.expense)}</p>
-        </article>
-      </section>
-
-      <section className="card">
-        <h2>Budget Tracker ({selectedMonth})</h2>
-        <p>Budget: {currency(monthBudget)}</p>
-        <p>Spent: {currency(spentInMonth)}</p>
-        <p>Remaining: {currency(monthBudget - spentInMonth)}</p>
-        <div className="progress-track" role="img" aria-label="Budget usage progress">
-          <div className="progress-fill" style={{ width: `${budgetProgress}%` }}></div>
         </div>
       </section>
 
-      <section className="charts-grid">
-        <article className="card">
-          <h2>Monthly Category Chart ({selectedMonth})</h2>
-          <CategoryBars totals={monthlyCategoryTotals} />
+      <section className="summary-grid">
+        <article className="card summary-card">
+          <p className="section-label">Selected month</p>
+          <strong>{currency(selectedMonthTotal)}</strong>
+          <span>
+            {selectedYear || formYear} / {selectedMonth} / {selectedCategory}
+          </span>
         </article>
-        <article className="card">
-          <h2>Yearly Category Chart ({selectedYear})</h2>
-          <CategoryBars totals={yearlyCategoryTotals} />
+        <article className="card summary-card">
+          <p className="section-label">Selected year</p>
+          <strong>{selectedYear ? currency(selectedYearTotal) : '—'}</strong>
+          <span>{selectedYear ? `${selectedYear} total` : 'Choose a year to see totals'}</span>
+        </article>
+        <article className="card summary-card">
+          <p className="section-label">Latest record</p>
+          <strong>{latestRecord ? currency(latestRecord.amount) : '—'}</strong>
+          <span>
+            {latestRecord
+              ? `${formatUsDate(latestRecord.date)} · ${latestRecord.category}`
+              : 'No records saved yet'}
+          </span>
         </article>
       </section>
 
-      <section className="card">
-        <h2>Plan (Past + Future)</h2>
-        <form className="form-grid" onSubmit={savePlan}>
-          <label>
-            Plan month
-            <input
-              type="month"
-              value={planForm.month}
-              onChange={(event) => setPlanForm((prev) => ({ ...prev, month: event.target.value }))}
-              required
-            />
-          </label>
-          <label>
-            Planned income
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={planForm.plannedIncome}
-              onChange={(event) => setPlanForm((prev) => ({ ...prev, plannedIncome: event.target.value }))}
-            />
-          </label>
-          <label>
-            Planned expense
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={planForm.plannedExpense}
-              onChange={(event) => setPlanForm((prev) => ({ ...prev, plannedExpense: event.target.value }))}
-            />
-          </label>
-          <label className="wide">
-            Note
-            <input
-              type="text"
-              value={planForm.note}
-              onChange={(event) => setPlanForm((prev) => ({ ...prev, note: event.target.value }))}
-              placeholder="Monthly memo"
-            />
-          </label>
-          <button type="submit" className="primary">Save Plan</button>
-        </form>
+      {selectedYear ? (
+        <section className="card">
+          <div className="section-heading">
+            <div>
+              <p className="section-label">Yearly graphs</p>
+              <h2>Monthly totals for every category in {selectedYear}</h2>
+            </div>
+          </div>
+          <div className="graph-strip" role="list" aria-label={`Category graphs for ${selectedYear}`}>
+            {yearlyGraphs.map((graph) => (
+              <CategoryGraph key={graph.category} graph={graph} />
+            ))}
+          </div>
+        </section>
+      ) : null}
 
-        <div className="plan-summary">
-          <p>Total planned income: {currency(plannedTotals.income)}</p>
-          <p>Total planned expense: {currency(plannedTotals.expense)}</p>
-          <p>Planned remaining: {currency(plannedTotals.income - plannedTotals.expense)}</p>
-          {monthlyPlan && (
-            <p>
-              {selectedMonth} plan: {currency(monthlyPlan.plannedIncome)} income / {currency(monthlyPlan.plannedExpense)} expense / {currency(monthlyPlan.plannedIncome - monthlyPlan.plannedExpense)} remaining
-            </p>
-          )}
-        </div>
-      </section>
+      <section className="content-grid">
+        <article className="card table-card">
+          <div className="section-heading">
+            <div>
+              <p className="section-label">Monthly table</p>
+              <h2>
+                {selectedYear ? `${selectedCategory} in ${selectedYear}/${selectedMonth}` : 'Select a year to view the table'}
+              </h2>
+            </div>
+          </div>
 
-      <section className="card">
-        <h2>Recent Records</h2>
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date</th>
-                <th>Type</th>
-                <th>Category</th>
-                <th>Subcategory</th>
-                <th>Description</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentEntries.length === 0 ? (
-                <tr>
-                  <td colSpan="6">No records yet.</td>
-                </tr>
-              ) : (
-                recentEntries.map((entry) => (
-                  <tr key={entry.id}>
-                    <td>{entry.date}</td>
-                    <td>{entry.type}</td>
-                    <td>{entry.category}</td>
-                    <td>{entry.subcategory}</td>
-                    <td>{entry.description || '-'}</td>
-                    <td>{currency(entry.amount)}</td>
+          {selectedYear ? (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Amount</th>
+                    <th>Notes</th>
                   </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+                </thead>
+                <tbody>
+                  {tableRows.map((row) => (
+                    <tr key={row.date}>
+                      <td>{formatUsDate(row.date)}</td>
+                      <td>{currency(row.amount)}</td>
+                      <td className="notes-cell" title={row.notes || 'No notes'}>
+                        <span>{row.notes || '—'}</span>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <p className="empty-state">Choose a year to render the daily table.</p>
+          )}
+        </article>
+
+        <article className="card form-card">
+          <div className="section-heading">
+            <div>
+              <p className="section-label">Add record</p>
+              <h2>Save one {selectedCategory.toLowerCase()} record</h2>
+            </div>
+          </div>
+          <form className="entry-form" onSubmit={saveRecord}>
+            <label>
+              Day
+              <select value={entryDay} onChange={(event) => setEntryDay(event.target.value)}>
+                {Array.from({ length: daysInSelectedMonth }, (_, index) => {
+                  const value = String(index + 1).padStart(2, '0')
+                  return (
+                    <option key={value} value={value}>
+                      {value}
+                    </option>
+                  )
+                })}
+              </select>
+            </label>
+            <label>
+              Amount
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={entryAmount}
+                onChange={(event) => setEntryAmount(event.target.value)}
+                placeholder="0.00"
+                required
+              />
+            </label>
+            <label>
+              Note
+              <input
+                type="text"
+                value={entryNote}
+                onChange={(event) => setEntryNote(event.target.value)}
+                placeholder="What was this about?"
+              />
+            </label>
+            <div className="form-meta">
+              <span>{formatUsDate(formDate)}</span>
+              <span>{selectedCategory}</span>
+            </div>
+            <button type="submit" className="primary">
+              Add record
+            </button>
+          </form>
+        </article>
       </section>
+
+      {(importError || statusMessage) && (
+        <section className="feedback-row">
+          {statusMessage ? <p className="status-text">{statusMessage}</p> : null}
+          {importError ? <p className="error-text">{importError}</p> : null}
+        </section>
+      )}
     </main>
   )
 }
 
-function CategoryBars({ totals }) {
-  const rows = Object.entries(totals).sort((a, b) => b[1] - a[1])
-  const max = rows[0]?.[1] || 0
-
-  if (rows.length === 0) {
-    return <p className="muted">No data yet.</p>
-  }
+function CategoryGraph({ graph }) {
+  const peak = Math.max(...graph.monthlyTotals.map((item) => item.total), 0)
 
   return (
-    <div className="bars">
-      {rows.map(([category, amount]) => (
-        <div key={category} className="bar-row">
-          <div className="bar-label">
-            <span>{category}</span>
-            <strong>{currency(amount)}</strong>
-          </div>
-          <div className="bar-track" role="img" aria-label={`${category} total`}>
-            <div className="bar-fill" style={{ width: `${max === 0 ? 0 : (amount / max) * 100}%` }}></div>
-          </div>
+    <article className="graph-card" role="listitem">
+      <div className="graph-header">
+        <div>
+          <h3>{graph.category}</h3>
+          <p>{currency(graph.yearlyTotal)}</p>
         </div>
-      ))}
-    </div>
+        <span className={`type-pill ${graph.type}`}>{graph.type}</span>
+      </div>
+      <div className="mini-chart" aria-label={`${graph.category} monthly totals`}>
+        {graph.monthlyTotals.map((item) => {
+          const ratio = peak === 0 ? 0 : item.total / peak
+          return (
+            <div key={item.month} className="mini-bar-group">
+              <div className="mini-bar-track">
+                <div className="mini-bar-fill" style={{ height: `${Math.max(ratio * 100, item.total ? 8 : 0)}%` }} />
+              </div>
+              <span>{item.month}</span>
+            </div>
+          )
+        })}
+      </div>
+    </article>
   )
 }
 
