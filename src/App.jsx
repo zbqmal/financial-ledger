@@ -12,7 +12,7 @@ const MAIN_CATEGORY_TREE = {
   Shopping: ['Wearing', 'Furniture/Home', 'Entertainment', 'Etc'],
   Subscriptions: ['Phone', 'Entertainment', 'Education', 'Sports', 'Etc'],
   Entertainment: ['Sports', 'Events', 'Park/Game', 'Parking', 'Etc'],
-  Trip: ['Hotel', 'Flight', 'Rental', 'Eat', 'Entertainment', 'Etc'],
+  Trip: ['Hotel', 'Flight', 'Car', 'Eat', 'Entertainment', 'Etc'],
   Health: ['Hospital', 'Dental', 'Medicine', 'Etc'],
   Etc: ['Gift', 'Etc'],
   Income: ['Salary', 'Bonus', 'TaxReturn', 'CashBack', 'Etc'],
@@ -70,6 +70,11 @@ const MONTH_OPTIONS = [
   { value: '12', label: 'December' },
 ]
 const YEAR_OPTIONS = Array.from({ length: 101 }, (_, index) => String(2100 - index))
+const SUB_CATEGORY_ALIASES = {
+  Trip: {
+    Rental: 'Car',
+  },
+}
 
 const today = new Date()
 const defaultYear = String(today.getFullYear())
@@ -89,8 +94,6 @@ const compactCurrency = (value) =>
     maximumFractionDigits: 1,
   }).format(value || 0)}`
 
-const AMOUNT_INPUT_PATTERN = /^\d*(?:\.\d{0,2})?$/
-
 const truncateText = (value, maxLength = 52) => {
   if (!value) return ''
   if (value.length <= maxLength) return value
@@ -98,17 +101,25 @@ const truncateText = (value, maxLength = 52) => {
 }
 
 const sanitizeAmountInput = (value) => {
-  const trimmed = value.replace(/[^\d.]/g, '')
-  const normalized = trimmed.replace(/\.(?=.*\.)/g, '')
+  const trimmed = value.trim()
+  if (!trimmed) return ''
 
-  if (!AMOUNT_INPUT_PATTERN.test(normalized)) {
-    return null
+  const isNegative = trimmed.startsWith('-')
+  const digitOnlyValue = trimmed.replace(/[^\d]/g, '')
+
+  if (!digitOnlyValue) {
+    return isNegative ? '-' : ''
   }
 
-  return normalized
+  const normalizedDigits = digitOnlyValue.replace(/^0+(?=\d)/, '') || '0'
+  const paddedDigits = normalizedDigits.padStart(3, '0')
+  const wholePart = paddedDigits.slice(0, -2).replace(/^0+(?=\d)/, '') || '0'
+  const decimalPart = paddedDigits.slice(-2)
+
+  return `${isNegative ? '-' : ''}${wholePart}.${decimalPart}`
 }
 
-const isValidAmountInput = (value) => /^\d+(?:\.\d{1,2})?$/.test(value)
+const isValidAmountInput = (value) => /^-?\d+(?:\.\d{2})$/.test(value)
 
 const formatUsDate = (isoDate) => {
   const [year, month, day] = isoDate.split('-')
@@ -127,6 +138,11 @@ const getFallbackSubCategory = (mainCategory) => {
 }
 
 const isValidMainCategory = (value) => MAIN_CATEGORY_OPTIONS.includes(value)
+
+const normalizeSubCategoryAlias = (mainCategory, value) => {
+  if (typeof value !== 'string') return value
+  return SUB_CATEGORY_ALIASES[mainCategory]?.[value] || value
+}
 
 const isValidSubCategory = (mainCategory, value) => getSubCategoryOptions(mainCategory).includes(value)
 
@@ -177,10 +193,12 @@ const normalizeRecord = (record) => {
 
   let mainCategory = null
   let subCategory = null
+  const normalizedMainCategory = typeof source.mainCategory === 'string' ? source.mainCategory : null
+  const normalizedSubCategory = normalizeSubCategoryAlias(normalizedMainCategory, source.subCategory)
 
-  if (isValidMainCategory(source.mainCategory) && isValidSubCategory(source.mainCategory, source.subCategory)) {
-    mainCategory = source.mainCategory
-    subCategory = source.subCategory
+  if (isValidMainCategory(normalizedMainCategory) && isValidSubCategory(normalizedMainCategory, normalizedSubCategory)) {
+    mainCategory = normalizedMainCategory
+    subCategory = normalizedSubCategory
   } else if (isValidMainCategory(source.category)) {
     mainCategory = source.category
     subCategory = getFallbackSubCategory(mainCategory)
@@ -189,7 +207,7 @@ const normalizeRecord = (record) => {
   }
 
   const amount = Number.parseFloat(source.amount)
-  if (!Number.isFinite(amount) || amount <= 0) return null
+  if (!Number.isFinite(amount) || amount === 0) return null
 
   return {
     id: typeof source.id === 'string' && source.id ? source.id : crypto.randomUUID(),
@@ -382,14 +400,14 @@ function App() {
   const saveRecord = (event) => {
     event.preventDefault()
     if (!addDraft || !isValidAmountInput(addDraft.amount)) {
-      setStatusMessage('Enter a valid amount with up to 2 decimal places.')
+      setStatusMessage('Enter a valid amount. Typed digits will be formatted to 2 decimals automatically.')
       return
     }
 
     const amount = Number.parseFloat(addDraft.amount)
 
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setStatusMessage('Enter an amount greater than 0.')
+    if (!Number.isFinite(amount) || amount === 0) {
+      setStatusMessage('Enter an amount other than 0.')
       return
     }
 
@@ -475,13 +493,13 @@ function App() {
     if (!editDraft) return
 
     if (!isValidAmountInput(editDraft.amount)) {
-      setStatusMessage('Enter a valid edited amount with up to 2 decimal places.')
+      setStatusMessage('Enter a valid edited amount. Typed digits will be formatted to 2 decimals automatically.')
       return
     }
 
     const amount = Number.parseFloat(editDraft.amount)
-    if (!Number.isFinite(amount) || amount <= 0) {
-      setStatusMessage('Enter an amount greater than 0.')
+    if (!Number.isFinite(amount) || amount === 0) {
+      setStatusMessage('Enter an amount other than 0.')
       return
     }
 
