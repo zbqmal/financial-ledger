@@ -10,3 +10,7 @@ export const MAIN_CATEGORY_TREE = {
   Etc: ["Gift", "Etc"],
   Income: ["Salary", "Bonus", "TaxReturn", "CashBack", "Etc"],
 };
+
+export const MAIN_CATEGORY_OPTIONS = Object.keys(
+  MAIN_CATEGORY_TREE,
+) as (keyof typeof MAIN_CATEGORY_TREE)[];
