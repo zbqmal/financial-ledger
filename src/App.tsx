@@ -2,12 +2,20 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import "./App.css";
 import Button from "./components/Button/Button";
 import DataManagementSection from "./features/DataManagementSection/DataManagementSection";
+import toast, { Toaster } from "react-hot-toast";
+import ResetRecordsDialog from "./features/DataManagementSection/ResetRecordsDialog";
+import {
+  getSubCategoryOptions,
+  loadInitialRecords,
+  parseRecords,
+} from "./utils/record-utils";
+import { FinancialRecord } from "./types/data-types";
+import { STORAGE_KEY } from "./constants/keys";
+import { MAIN_CATEGORY_OPTIONS } from "./constants/constants";
 
 const YearlyGraphsSection = lazy(() => import("./YearlyGraphsSection.jsx"));
 
-const STORAGE_KEY = "financial-ledger-data-v2";
 const ALL_SUB_CATEGORY_VALUE = "__all__";
-const MAIN_CATEGORY_OPTIONS = Object.keys(MAIN_CATEGORY_TREE);
 const DEFAULT_MAIN_CATEGORY = "Housing";
 const CATEGORY_KIND = {
   Housing: "expense",
@@ -62,11 +70,6 @@ const MONTH_OPTIONS = [
 const YEAR_OPTIONS = Array.from({ length: 101 }, (_, index) =>
   String(2100 - index),
 );
-const SUB_CATEGORY_ALIASES = {
-  Trip: {
-    Rental: "Car",
-  },
-};
 
 const today = new Date();
 const defaultYear = String(today.getFullYear());
@@ -121,9 +124,6 @@ const formatUsDate = (isoDate) => {
 const getDaysInMonth = (year, month) =>
   new Date(Number(year), Number(month), 0).getDate();
 
-const getSubCategoryOptions = (mainCategory) =>
-  MAIN_CATEGORY_TREE[mainCategory] || [];
-
 const getDefaultSubCategory = (mainCategory) =>
   getSubCategoryOptions(mainCategory)[0] || "";
 
@@ -131,16 +131,6 @@ const getFallbackSubCategory = (mainCategory) => {
   const options = getSubCategoryOptions(mainCategory);
   return options.includes("Etc") ? "Etc" : options[0] || "";
 };
-
-const isValidMainCategory = (value) => MAIN_CATEGORY_OPTIONS.includes(value);
-
-const normalizeSubCategoryAlias = (mainCategory, value) => {
-  if (typeof value !== "string") return value;
-  return SUB_CATEGORY_ALIASES[mainCategory]?.[value] || value;
-};
-
-const isValidSubCategory = (mainCategory, value) =>
-  getSubCategoryOptions(mainCategory).includes(value);
 
 const getSubCategoryColor = (mainCategory, index) => {
   const palette = SUB_CATEGORY_PALETTES[mainCategory];
@@ -164,95 +154,10 @@ const buildBackupPayload = (records) => ({
   ]),
 });
 
-const normalizeRecord = (record) => {
-  const source = Array.isArray(record)
-    ? record.length >= 6
-      ? {
-          id: record[0],
-          date: record[1],
-          mainCategory: record[2],
-          subCategory: record[3],
-          amount: record[4],
-          note: record[5],
-        }
-      : {
-          id: record[0],
-          date: record[1],
-          category: record[2],
-          amount: record[3],
-          note: record[4],
-        }
-    : record;
-
-  if (!source || typeof source !== "object") return null;
-  if (
-    typeof source.date !== "string" ||
-    !/^\d{4}-\d{2}-\d{2}$/.test(source.date)
-  )
-    return null;
-
-  let mainCategory = null;
-  let subCategory = null;
-  const normalizedMainCategory =
-    typeof source.mainCategory === "string" ? source.mainCategory : null;
-  const normalizedSubCategory = normalizeSubCategoryAlias(
-    normalizedMainCategory,
-    source.subCategory,
-  );
-
-  if (
-    isValidMainCategory(normalizedMainCategory) &&
-    isValidSubCategory(normalizedMainCategory, normalizedSubCategory)
-  ) {
-    mainCategory = normalizedMainCategory;
-    subCategory = normalizedSubCategory;
-  } else if (isValidMainCategory(source.category)) {
-    mainCategory = source.category;
-    subCategory = getFallbackSubCategory(mainCategory);
-  } else {
-    return null;
-  }
-
-  const amount = Number.parseFloat(source.amount);
-  if (!Number.isFinite(amount) || amount === 0) return null;
-
-  return {
-    id:
-      typeof source.id === "string" && source.id
-        ? source.id
-        : crypto.randomUUID(),
-    date: source.date,
-    mainCategory,
-    subCategory,
-    amount,
-    note: typeof source.note === "string" ? source.note.trim() : "",
-  };
-};
-
-const parseRecords = (payload) => {
-  if (
-    !payload ||
-    typeof payload !== "object" ||
-    !Array.isArray(payload.records)
-  ) {
-    return [];
-  }
-
-  return payload.records.map(normalizeRecord).filter(Boolean);
-};
-
-const loadInitialRecords = () => {
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return [];
-    return parseRecords(JSON.parse(saved));
-  } catch {
-    return [];
-  }
-};
-
 export const App: React.FC = () => {
-  const [records, setRecords] = useState(() => loadInitialRecords());
+  const [records, setRecords] = useState<FinancialRecord[]>(() =>
+    loadInitialRecords(),
+  );
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [graphYear, setGraphYear] = useState(defaultYear);
   const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
@@ -264,6 +169,13 @@ export const App: React.FC = () => {
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [addDraft, setAddDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
+
+  const updateRecords = (record: FinancialRecord[]) => {
+    setRecords(record);
+  };
+  const openResetDialog = (open: boolean) => {
+    setResetDialogOpen(open);
+  };
 
   useEffect(() => {
     localStorage.setItem(
@@ -474,21 +386,10 @@ export const App: React.FC = () => {
     setImportError("");
   };
 
-  const resetData = () => {
-    if (!records.length) {
-      setStatusMessage("No data to reset.");
-      setImportError("");
-      return;
-    }
-
-    setResetDialogOpen(true);
-  };
-
   const confirmResetData = () => {
     setRecords([]);
     setResetDialogOpen(false);
-    setStatusMessage("All data reset.");
-    setImportError("");
+    toast.success("All data reset.");
   };
 
   const openEditRecord = (record) => {
@@ -584,6 +485,8 @@ export const App: React.FC = () => {
 
   return (
     <main className="app-shell">
+      <Toaster position="top-center" reverseOrder={false} />
+
       <section className="hero card">
         <div>
           <p className="eyebrow">Personal finance ledger</p>
@@ -594,7 +497,11 @@ export const App: React.FC = () => {
             backed up locally.
           </p>
         </div>
-        <DataManagementSection />
+        <DataManagementSection
+          records={records}
+          openResetDialog={openResetDialog}
+          updateRecords={updateRecords}
+        />
       </section>
 
       {graphYear ? (
@@ -778,41 +685,12 @@ export const App: React.FC = () => {
         )}
       </article>
 
-      {(importError || statusMessage) && (
-        <section className="feedback-row">
-          {statusMessage ? (
-            <p className="status-text">{statusMessage}</p>
-          ) : null}
-          {importError ? <p className="error-text">{importError}</p> : null}
-        </section>
+      {resetDialogOpen && (
+        <ResetRecordsDialog
+          openResetDialog={openResetDialog}
+          confirmResetData={confirmResetData}
+        />
       )}
-
-      {resetDialogOpen ? (
-        <ModalShell
-          title="Reset all data"
-          onClose={() => setResetDialogOpen(false)}
-        >
-          <p className="modal-copy">
-            This will delete all imported and locally saved records.
-          </p>
-          <div className="modal-actions">
-            <button
-              type="button"
-              className="secondary"
-              onClick={() => setResetDialogOpen(false)}
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              className="primary"
-              onClick={confirmResetData}
-            >
-              Reset all data
-            </button>
-          </div>
-        </ModalShell>
-      ) : null}
 
       {addDraft ? (
         <ModalShell title="Add record" onClose={() => setAddDraft(null)}>
@@ -920,22 +798,3 @@ export const App: React.FC = () => {
     </main>
   );
 };
-
-function ModalShell({ title, children, onClose }) {
-  return (
-    <div className="modal-backdrop" role="presentation" onClick={onClose}>
-      <section
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="modal-header">
-          <h3>{title}</h3>
-        </div>
-        {children}
-      </section>
-    </div>
-  );
-}
