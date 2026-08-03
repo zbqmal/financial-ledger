@@ -1,4 +1,4 @@
-import { MAIN_CATEGORY_TREE } from "../constants/constants";
+import { MAIN_CATEGORY_TREE } from "../constants/categories";
 
 export type FinancialRecordTuple = [
   string,

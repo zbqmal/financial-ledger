@@ -1,7 +1,7 @@
 import {
   MAIN_CATEGORY_OPTIONS,
   MAIN_CATEGORY_TREE,
-} from "../constants/constants";
+} from "../constants/categories";
 import { STORAGE_KEY } from "../constants/keys";
 import {
   FinancialDataType,
