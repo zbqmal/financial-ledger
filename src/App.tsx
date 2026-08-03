@@ -1,93 +1,29 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { lazy, useEffect, useMemo, useState } from "react";
 import "./App.css";
-import Button from "./components/Button/Button";
-import DataManagementSection from "./features/DataManagementSection/DataManagementSection";
+import DataManagementSection from "./features/HeroSection/DataManagementSection";
 import toast, { Toaster } from "react-hot-toast";
-import ResetRecordsDialog from "./features/DataManagementSection/ResetRecordsDialog";
+import ResetRecordsDialog from "./features/HeroSection/ResetRecordsDialog";
 import {
   getSubCategoryOptions,
   loadInitialRecords,
-  parseRecords,
 } from "./utils/record-utils";
 import { FinancialRecord } from "./types/data-types";
 import { STORAGE_KEY } from "./constants/keys";
-import { MAIN_CATEGORY_OPTIONS } from "./constants/constants";
+import { MAIN_CATEGORY_OPTIONS } from "./constants/categories";
+import IntroSection from "./features/HeroSection/IntroSection";
+import { MONTH_OPTIONS, YEAR_OPTIONS } from "./constants/dates";
+import Modal from "./components/Modal/Modal";
+import { currency } from "./utils/currency-utils";
 
-const YearlyGraphsSection = lazy(() => import("./YearlyGraphsSection.jsx"));
-
-const ALL_SUB_CATEGORY_VALUE = "__all__";
-const DEFAULT_MAIN_CATEGORY = "Housing";
-const CATEGORY_KIND = {
-  Housing: "expense",
-  Vehicle: "expense",
-  Eat: "expense",
-  Shopping: "expense",
-  Subscriptions: "expense",
-  Entertainment: "expense",
-  Trip: "expense",
-  Health: "expense",
-  Etc: "expense",
-  Income: "income",
-};
-const MAIN_CATEGORY_HUES = {
-  Housing: 220,
-  Vehicle: 16,
-  Eat: 142,
-  Shopping: 336,
-  Subscriptions: 268,
-  Entertainment: 192,
-  Trip: 42,
-  Health: 158,
-  Etc: 210,
-  Income: 126,
-};
-const SUB_CATEGORY_PALETTES = {
-  Housing: ["#2563eb", "#f97316", "#06b6d4", "#ef4444", "#22c55e", "#8b5cf6"],
-  Vehicle: ["#dc2626", "#0ea5e9", "#f59e0b", "#14b8a6", "#7c3aed"],
-  Eat: ["#16a34a", "#f97316", "#ec4899"],
-  Shopping: ["#db2777", "#0f766e", "#f59e0b", "#6366f1"],
-  Subscriptions: ["#0284c7", "#8b5cf6", "#f43f5e", "#16a34a", "#f59e0b"],
-  Entertainment: ["#0ea5e9", "#ef4444", "#22c55e", "#f59e0b", "#8b5cf6"],
-  Trip: ["#2563eb", "#f97316", "#14b8a6", "#ef4444", "#a855f7", "#84cc16"],
-  Health: ["#dc2626", "#06b6d4", "#84cc16", "#8b5cf6"],
-  Etc: ["#f97316", "#64748b"],
-  Income: ["#16a34a", "#f59e0b", "#0284c7", "#ec4899", "#6366f1"],
-};
-const MONTH_OPTIONS = [
-  { value: "01", label: "January" },
-  { value: "02", label: "February" },
-  { value: "03", label: "March" },
-  { value: "04", label: "April" },
-  { value: "05", label: "May" },
-  { value: "06", label: "June" },
-  { value: "07", label: "July" },
-  { value: "08", label: "August" },
-  { value: "09", label: "September" },
-  { value: "10", label: "October" },
-  { value: "11", label: "November" },
-  { value: "12", label: "December" },
-];
-const YEAR_OPTIONS = Array.from({ length: 101 }, (_, index) =>
-  String(2100 - index),
+const YearlyGraphsSection = lazy(
+  () => import("./features/YearlyGraphsSection/YearlyGraphsSection.js"),
 );
+
+const DEFAULT_MAIN_CATEGORY = "Housing";
 
 const today = new Date();
 const defaultYear = String(today.getFullYear());
 const defaultMonth = String(today.getMonth() + 1).padStart(2, "0");
-const defaultDay = String(today.getDate()).padStart(2, "0");
-
-const currency = (value) =>
-  new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    maximumFractionDigits: 2,
-  }).format(value || 0);
-
-const compactCurrency = (value) =>
-  `$${new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value || 0)}`;
 
 const truncateText = (value, maxLength = 52) => {
   if (!value) return "";
@@ -132,15 +68,6 @@ const getFallbackSubCategory = (mainCategory) => {
   return options.includes("Etc") ? "Etc" : options[0] || "";
 };
 
-const getSubCategoryColor = (mainCategory, index) => {
-  const palette = SUB_CATEGORY_PALETTES[mainCategory];
-  if (palette?.[index]) return palette[index];
-
-  const hue = MAIN_CATEGORY_HUES[mainCategory] ?? 210;
-  const fallbackHue = (hue + index * 57) % 360;
-  return `hsl(${fallbackHue} 72% 48%)`;
-};
-
 const buildBackupPayload = (records) => ({
   version: 2,
   exportedAt: new Date().toISOString(),
@@ -159,23 +86,14 @@ export const App: React.FC = () => {
     loadInitialRecords(),
   );
   const [selectedYear, setSelectedYear] = useState(defaultYear);
-  const [graphYear, setGraphYear] = useState(defaultYear);
   const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
   const [selectedMainCategory, setSelectedMainCategory] = useState(
     DEFAULT_MAIN_CATEGORY,
   );
-  const [importError, setImportError] = useState("");
   const [statusMessage, setStatusMessage] = useState("");
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
   const [addDraft, setAddDraft] = useState(null);
   const [editDraft, setEditDraft] = useState(null);
-
-  const updateRecords = (record: FinancialRecord[]) => {
-    setRecords(record);
-  };
-  const openResetDialog = (open: boolean) => {
-    setResetDialogOpen(open);
-  };
 
   useEffect(() => {
     localStorage.setItem(
@@ -233,92 +151,6 @@ export const App: React.FC = () => {
     );
   }, [filteredRecords, selectedMainSubCategories, selectedMonth, selectedYear]);
 
-  const yearlyGraphs = useMemo(() => {
-    if (!graphYear) return [];
-
-    return MAIN_CATEGORY_OPTIONS.map((mainCategory) => {
-      const subCategories = getSubCategoryOptions(mainCategory);
-      const monthlyTotals = MONTH_OPTIONS.map((month) => {
-        const totals = Object.fromEntries(
-          subCategories.map((subCategory) => [subCategory, 0]),
-        );
-
-        records.forEach((record) => {
-          if (
-            record.mainCategory === mainCategory &&
-            record.date.startsWith(graphYear) &&
-            record.date.slice(5, 7) === month.value
-          ) {
-            totals[record.subCategory] += record.amount;
-          }
-        });
-
-        return {
-          month: month.label.slice(0, 3),
-          ...totals,
-        };
-      });
-
-      const subCategoryTotals = Object.fromEntries(
-        subCategories.map((subCategory) => [
-          subCategory,
-          monthlyTotals.reduce((sum, item) => sum + item[subCategory], 0),
-        ]),
-      );
-
-      return {
-        mainCategory,
-        type: CATEGORY_KIND[mainCategory],
-        subCategories,
-        monthlyTotals,
-        subCategoryTotals,
-        yearlyTotal: Object.values(subCategoryTotals).reduce(
-          (sum, value) => sum + value,
-          0,
-        ),
-      };
-    });
-  }, [graphYear, records]);
-
-  const yearlyComparisonGraph = useMemo(() => {
-    if (!graphYear) return null;
-
-    const monthlyTotals = MONTH_OPTIONS.map((month) => {
-      let income = 0;
-      let expense = 0;
-
-      records.forEach((record) => {
-        if (
-          record.date.startsWith(graphYear) &&
-          record.date.slice(5, 7) === month.value
-        ) {
-          if (CATEGORY_KIND[record.mainCategory] === "income") {
-            income += record.amount;
-          } else {
-            expense += record.amount;
-          }
-        }
-      });
-
-      return {
-        month: month.label.slice(0, 3),
-        Income: income,
-        Expense: expense,
-      };
-    });
-
-    return {
-      title: "Income & Expense",
-      lines: [
-        { key: "Income", color: "#16a34a" },
-        { key: "Expense", color: "#dc2626" },
-      ],
-      monthlyTotals,
-      yearlyIncome: monthlyTotals.reduce((sum, item) => sum + item.Income, 0),
-      yearlyExpense: monthlyTotals.reduce((sum, item) => sum + item.Expense, 0),
-    };
-  }, [graphYear, records]);
-
   const openAddRecord = (date, subCategory) => {
     setAddDraft({
       date,
@@ -375,7 +207,6 @@ export const App: React.FC = () => {
     setStatusMessage(
       `${addDraft.mainCategory} / ${addDraft.subCategory} record saved locally.`,
     );
-    setImportError("");
   };
 
   const deleteRecord = (recordId) => {
@@ -383,7 +214,6 @@ export const App: React.FC = () => {
       previous.filter((record) => record.id !== recordId),
     );
     setStatusMessage("Record deleted.");
-    setImportError("");
   };
 
   const confirmResetData = () => {
@@ -448,39 +278,6 @@ export const App: React.FC = () => {
 
     setEditDraft(null);
     setStatusMessage("Record updated.");
-    setImportError("");
-  };
-
-  const importData = (event) => {
-    const file = event.target.files?.[0];
-    setImportError("");
-    setStatusMessage("");
-
-    if (!file) return;
-
-    const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const parsed = JSON.parse(String(reader.result || "{}"));
-        const nextRecords = parseRecords(parsed);
-
-        if (!Array.isArray(parsed.records)) {
-          throw new Error("invalid");
-        }
-
-        setRecords(nextRecords);
-        setStatusMessage(
-          `Imported ${nextRecords.length} record${nextRecords.length === 1 ? "" : "s"}.`,
-        );
-      } catch {
-        setImportError(
-          "Import failed. Please use a valid financial-ledger backup file.",
-        );
-      }
-    };
-
-    reader.readAsText(file);
-    event.target.value = "";
   };
 
   return (
@@ -488,47 +285,15 @@ export const App: React.FC = () => {
       <Toaster position="top-center" reverseOrder={false} />
 
       <section className="hero card">
-        <div>
-          <p className="eyebrow">Personal finance ledger</p>
-          <h1>Simple, modern money tracking for your own monthly flow.</h1>
-          <p className="hero-copy">
-            Pick a year, month, main-category, and sub-category to review your
-            history, then add one transaction at a time and keep everything
-            backed up locally.
-          </p>
-        </div>
+        <IntroSection />
         <DataManagementSection
           records={records}
-          openResetDialog={openResetDialog}
-          updateRecords={updateRecords}
+          openResetDialog={(open: boolean) => setResetDialogOpen(open)}
+          updateRecords={(record: FinancialRecord[]) => setRecords(record)}
         />
       </section>
 
-      {graphYear ? (
-        <Suspense
-          fallback={
-            <section className="card graph-section graph-loading">
-              <div className="section-heading">
-                <div>
-                  <p className="section-label">Yearly graphs</p>
-                </div>
-              </div>
-              <p className="status-text">Loading yearly graphs...</p>
-            </section>
-          }
-        >
-          <YearlyGraphsSection
-            yearlyGraphs={yearlyGraphs}
-            comparisonGraph={yearlyComparisonGraph}
-            selectedYear={graphYear}
-            onYearChange={setGraphYear}
-            yearOptions={YEAR_OPTIONS}
-            currency={currency}
-            compactCurrency={compactCurrency}
-            getSubCategoryColor={getSubCategoryColor}
-          />
-        </Suspense>
-      ) : null}
+      <YearlyGraphsSection records={records} />
 
       <article className="card table-card">
         <div className="section-heading">
@@ -687,13 +452,13 @@ export const App: React.FC = () => {
 
       {resetDialogOpen && (
         <ResetRecordsDialog
-          openResetDialog={openResetDialog}
+          openResetDialog={(open: boolean) => setResetDialogOpen(open)}
           confirmResetData={confirmResetData}
         />
       )}
 
       {addDraft ? (
-        <ModalShell title="Add record" onClose={() => setAddDraft(null)}>
+        <Modal title="Add record" onClose={() => setAddDraft(null)}>
           <form className="edit-form" onSubmit={saveRecord}>
             <div className="record-meta-grid">
               <div className="record-meta-card">
@@ -740,11 +505,11 @@ export const App: React.FC = () => {
               </button>
             </div>
           </form>
-        </ModalShell>
+        </Modal>
       ) : null}
 
       {editDraft ? (
-        <ModalShell title="Edit record" onClose={() => setEditDraft(null)}>
+        <Modal title="Edit record" onClose={() => setEditDraft(null)}>
           <form className="edit-form" onSubmit={saveEditedRecord}>
             <div className="record-meta-grid">
               <div className="record-meta-card">
@@ -793,7 +558,7 @@ export const App: React.FC = () => {
               </button>
             </div>
           </form>
-        </ModalShell>
+        </Modal>
       ) : null}
     </main>
   );
