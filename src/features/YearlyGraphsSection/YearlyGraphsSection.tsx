@@ -139,6 +139,7 @@ const YearlyGraphsSection: React.FC<YearlyGraphsSectionProps> = ({
         >
           {yearlyComparisonGraph ? (
             <YearlyGraph
+              key="yearly-comparison-graph"
               title={yearlyComparisonGraph.title}
               subheader={`${currency(yearlyComparisonGraph.yearlyIncome)} vs ${currency(yearlyComparisonGraph.yearlyExpense)}`}
               chipText="Income vs Expense"

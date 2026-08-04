@@ -98,3 +98,32 @@ const isValidSubCategory = (mainCategory: MainCategory, value: string) =>
 
 export const getSubCategoryOptions = (mainCategory: MainCategory) =>
   MAIN_CATEGORY_TREE[mainCategory] || [];
+
+export const truncateText = (value: string, maxLength = 52) => {
+  if (!value) return "";
+  if (value.length <= maxLength) return value;
+
+  return `${value.slice(0, maxLength - 1)}…`;
+};
+
+export const isValidAmountInput = (value: string) =>
+  /^-?\d+(?:\.\d{2})$/.test(value);
+
+export const sanitizeAmountInput = (value: string) => {
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+
+  const isNegative = trimmed.startsWith("-");
+  const digitOnlyValue = trimmed.replace(/[^\d]/g, "");
+
+  if (!digitOnlyValue) {
+    return isNegative ? "-" : "";
+  }
+
+  const normalizedDigits = digitOnlyValue.replace(/^0+(?=\d)/, "") || "0";
+  const paddedDigits = normalizedDigits.padStart(3, "0");
+  const wholePart = paddedDigits.slice(0, -2).replace(/^0+(?=\d)/, "") || "0";
+  const decimalPart = paddedDigits.slice(-2);
+
+  return `${isNegative ? "-" : ""}${wholePart}.${decimalPart}`;
+};

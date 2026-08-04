@@ -25,3 +25,12 @@ export type FinancialRecord = {
   amount: number;
   note: string;
 };
+
+export type UpdateRecordDraftType = {
+  id?: string;
+  date: string;
+  mainCategory: MainCategory;
+  subCategory: string;
+  amount: string;
+  note: string;
+};
