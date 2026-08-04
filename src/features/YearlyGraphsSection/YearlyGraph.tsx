@@ -17,7 +17,6 @@ import YearlyGraphTooltip from "./YearlyGraphToolTip";
 import { getSubCategoryColor } from "../../utils/category-utils";
 
 type YearlyGraphProps = {
-  key?: string;
   title: string;
   subheader: string;
   chipText: string;
@@ -28,7 +27,6 @@ type YearlyGraphProps = {
 };
 
 const YearlyGraph: React.FC<YearlyGraphProps> = ({
-  key,
   title,
   subheader,
   chipText,
@@ -121,7 +119,7 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
   );
 
   return (
-    <article key={key} className="graph-card" role="listitem">
+    <article className="graph-card" role="listitem">
       <div className="graph-header">
         <div>
           <h3>{title}</h3>
@@ -135,7 +133,7 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
       </div>
 
       <div className="chart-wrap" aria-label={ariaLabelForChartWrap}>
-        <ResponsiveContainer width="100%" height="100%">
+        <ResponsiveContainer width="100%" height={220}>
           <LineChart
             data={graphData}
             margin={{ top: 8, right: 12, left: 2, bottom: 4 }}
