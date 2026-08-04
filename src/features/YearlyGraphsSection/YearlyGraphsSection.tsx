@@ -22,13 +22,6 @@ const YearlyGraphsSection: React.FC<YearlyGraphsSectionProps> = ({
   );
 
   const { yearlyComparisonGraph, yearlyGraphs } = useMemo(() => {
-    if (!selectedYear) {
-      return {
-        yearlyComparisonGraph: null,
-        yearlyGraphs: [],
-      };
-    }
-
     const monthIndexByValue = Object.fromEntries(
       MONTH_OPTIONS.map((month, index) => [month.value, index]),
     ) as Record<string, number>;
@@ -137,33 +130,29 @@ const YearlyGraphsSection: React.FC<YearlyGraphsSectionProps> = ({
           role="list"
           aria-label={`Main-category graphs for ${selectedYear}`}
         >
-          {yearlyComparisonGraph ? (
-            <YearlyGraph
-              key="yearly-comparison-graph"
-              title={yearlyComparisonGraph.title}
-              subheader={`${currency(yearlyComparisonGraph.yearlyIncome)} vs ${currency(yearlyComparisonGraph.yearlyExpense)}`}
-              chipText="Income vs Expense"
-              ariaLabelForGraphLegend="Income and expense totals"
-              ariaLabelForChartWrap="Monthly income and expense totals"
-              yearlyComparisonGraph={yearlyComparisonGraph}
-              yearlyGraph={null}
-            />
-          ) : null}
+          <YearlyGraph
+            key="yearly-comparison-graph"
+            title={yearlyComparisonGraph.title}
+            subheader={`${currency(yearlyComparisonGraph.yearlyIncome)} vs ${currency(yearlyComparisonGraph.yearlyExpense)}`}
+            chipText="Income vs Expense"
+            ariaLabelForGraphLegend="Income and expense totals"
+            ariaLabelForChartWrap="Monthly income and expense totals"
+            yearlyComparisonGraph={yearlyComparisonGraph}
+            yearlyGraph={null}
+          />
 
-          {yearlyGraphs
-            ? yearlyGraphs.map((graph) => (
-                <YearlyGraph
-                  key={graph.mainCategory}
-                  title={graph.mainCategory}
-                  subheader={currency(graph.yearlyTotal)}
-                  chipText={graph.type}
-                  ariaLabelForGraphLegend={`${graph.mainCategory} sub-categories`}
-                  ariaLabelForChartWrap={`${graph.mainCategory} monthly sub-category totals`}
-                  yearlyComparisonGraph={null}
-                  yearlyGraph={graph}
-                />
-              ))
-            : null}
+          {yearlyGraphs.map((graph) => (
+            <YearlyGraph
+              key={graph.mainCategory}
+              title={graph.mainCategory}
+              subheader={currency(graph.yearlyTotal)}
+              chipText={graph.type}
+              ariaLabelForGraphLegend={`${graph.mainCategory} sub-categories`}
+              ariaLabelForChartWrap={`${graph.mainCategory} monthly sub-category totals`}
+              yearlyComparisonGraph={null}
+              yearlyGraph={graph}
+            />
+          ))}
         </div>
       </div>
     </section>

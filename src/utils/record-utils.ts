@@ -120,9 +120,9 @@ export const sanitizeAmountInput = (value: string) => {
     return isNegative ? "-" : "";
   }
 
-  const normalizedDigits = digitOnlyValue.replace(/^0+(?=\d)/, "") || "0";
+  const normalizedDigits = digitOnlyValue.replace(/^0+(?=\d)/, "");
   const paddedDigits = normalizedDigits.padStart(3, "0");
-  const wholePart = paddedDigits.slice(0, -2).replace(/^0+(?=\d)/, "") || "0";
+  const wholePart = paddedDigits.slice(0, -2).replace(/^0+(?=\d)/, "");
   const decimalPart = paddedDigits.slice(-2);
 
   return `${isNegative ? "-" : ""}${wholePart}.${decimalPart}`;
