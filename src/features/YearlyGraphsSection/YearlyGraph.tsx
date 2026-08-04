@@ -39,83 +39,88 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
     return null;
   }
 
-  const headerClassName = yearlyComparisonGraph
+  const isComparisonGraph = Boolean(yearlyComparisonGraph);
+  const activeYearlyGraph = yearlyGraph as YearlyGraphType;
+  const comparisonGraph = yearlyComparisonGraph as Exclude<
+    YearlyComparisonGraphType,
+    null
+  >;
+
+  const headerClassName = isComparisonGraph
     ? "compare"
-    : yearlyGraph
-      ? yearlyGraph.type
-      : "";
+    : activeYearlyGraph.type;
 
   const graphLegend = useMemo(
-    () =>
-      yearlyComparisonGraph
-        ? yearlyComparisonGraph.lines.map((line) => (
-            <span key={line.key} className="legend-chip">
-              <span
-                className="legend-swatch"
-                style={{ backgroundColor: line.color }}
-                aria-hidden="true"
-              />
-              {line.key}
-            </span>
-          ))
-        : yearlyGraph
-          ? yearlyGraph.subCategories.map((subCategory, index) => (
-              <span key={subCategory} className="legend-chip">
-                <span
-                  className="legend-swatch"
-                  style={{
-                    backgroundColor: getSubCategoryColor(
-                      yearlyGraph.mainCategory,
-                      index,
-                    ),
-                  }}
-                  aria-hidden="true"
-                />
-                {subCategory}
-              </span>
-            ))
-          : null,
-    [yearlyComparisonGraph, yearlyGraph],
+    () => {
+      if (isComparisonGraph) {
+        return comparisonGraph.lines.map((line) => (
+          <span key={line.key} className="legend-chip">
+            <span
+              className="legend-swatch"
+              style={{ backgroundColor: line.color }}
+              aria-hidden="true"
+            />
+            {line.key}
+          </span>
+        ));
+      }
+
+      return activeYearlyGraph.subCategories.map((subCategory, index) => (
+        <span key={subCategory} className="legend-chip">
+          <span
+            className="legend-swatch"
+            style={{
+              backgroundColor: getSubCategoryColor(
+                activeYearlyGraph.mainCategory,
+                index,
+              ),
+            }}
+            aria-hidden="true"
+          />
+          {subCategory}
+        </span>
+      ));
+    },
+    [activeYearlyGraph, comparisonGraph, isComparisonGraph],
   );
 
-  const graphData = yearlyComparisonGraph
-    ? yearlyComparisonGraph.monthlyTotals
-    : yearlyGraph
-      ? yearlyGraph.monthlyTotals
-      : [];
+  const graphData = isComparisonGraph
+    ? comparisonGraph.monthlyTotals
+    : activeYearlyGraph.monthlyTotals;
 
   const graphLine = useMemo(
-    () =>
-      yearlyComparisonGraph
-        ? yearlyComparisonGraph.lines.map((line) => (
-            <Line
-              key={line.key}
-              type="monotone"
-              dataKey={line.key}
-              stroke={line.color}
-              strokeWidth={2.8}
-              dot={{ r: 2.5, fill: line.color, strokeWidth: 0 }}
-              activeDot={{ r: 4 }}
-            />
-          ))
-        : yearlyGraph
-          ? yearlyGraph.subCategories.map((subCategory, index) => (
-              <Line
-                key={subCategory}
-                type="monotone"
-                dataKey={subCategory}
-                stroke={getSubCategoryColor(yearlyGraph.mainCategory, index)}
-                strokeWidth={2.5}
-                dot={{
-                  r: 2.5,
-                  fill: getSubCategoryColor(yearlyGraph.mainCategory, index),
-                  strokeWidth: 0,
-                }}
-                activeDot={{ r: 4 }}
-              />
-            ))
-          : null,
-    [yearlyComparisonGraph, yearlyGraph],
+    () => {
+      if (isComparisonGraph) {
+        return comparisonGraph.lines.map((line) => (
+          <Line
+            key={line.key}
+            type="monotone"
+            dataKey={line.key}
+            stroke={line.color}
+            strokeWidth={2.8}
+            dot={{ r: 2.5, fill: line.color, strokeWidth: 0 }}
+            activeDot={{ r: 4 }}
+          />
+        ));
+      }
+
+      return activeYearlyGraph.subCategories.map((subCategory, index) => (
+        <Line
+          key={subCategory}
+          type="monotone"
+          dataKey={subCategory}
+          stroke={getSubCategoryColor(activeYearlyGraph.mainCategory, index)}
+          strokeWidth={2.5}
+          dot={{
+            r: 2.5,
+            fill: getSubCategoryColor(activeYearlyGraph.mainCategory, index),
+            strokeWidth: 0,
+          }}
+          activeDot={{ r: 4 }}
+        />
+      ));
+    },
+    [activeYearlyGraph, comparisonGraph, isComparisonGraph],
   );
 
   return (
