@@ -48,10 +48,9 @@ export const loadStoredRecords = (): {
   try {
     const payload = JSON.parse(saved);
     records = parseRecords(payload);
-    const storedCount = Array.isArray(payload?.records)
-      ? payload.records.length
-      : 0;
-    lostData = records.length < storedCount || !Array.isArray(payload?.records);
+    lostData =
+      !Array.isArray(payload?.records) ||
+      records.length < payload.records.length;
   } catch {
     lostData = true;
   }

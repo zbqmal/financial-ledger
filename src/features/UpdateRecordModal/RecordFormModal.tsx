@@ -27,10 +27,7 @@ const RecordFormModal: React.FC<RecordFormModalProps> = ({
   const updateRecordDraft = (field: string, value: string) => {
     setDraft((previous) => {
       if (field === "amount") {
-        const nextAmount = sanitizeAmountInput(value);
-        if (nextAmount === null) return previous;
-
-        return { ...previous, amount: nextAmount };
+        return { ...previous, amount: sanitizeAmountInput(value) };
       }
 
       return { ...previous, [field]: value };

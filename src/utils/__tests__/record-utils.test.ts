@@ -187,6 +187,44 @@ describe("record-utils", () => {
       expect(localStorage.getItem(BACKUP_STORAGE_KEY)).toBe(raw);
     });
 
+    it("backs up stored JSON that is not a records payload", () => {
+      localStorage.setItem(STORAGE_KEY, "null");
+
+      expect(loadStoredRecords()).toEqual({
+        records: [],
+        backedUpRawData: true,
+      });
+    });
+
+    it("returns no records when storage cannot be read", () => {
+      const spy = jest
+        .spyOn(Storage.prototype, "getItem")
+        .mockImplementation(() => {
+          throw new Error("SecurityError");
+        });
+
+      expect(loadStoredRecords()).toEqual({
+        records: [],
+        backedUpRawData: false,
+      });
+      spy.mockRestore();
+    });
+
+    it("reports no backup when the backup write fails", () => {
+      localStorage.setItem(STORAGE_KEY, "not-json");
+      const spy = jest
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(() => {
+          throw new Error("QuotaExceededError");
+        });
+
+      expect(loadStoredRecords()).toEqual({
+        records: [],
+        backedUpRawData: false,
+      });
+      spy.mockRestore();
+    });
+
     it("never overwrites an existing backup", () => {
       localStorage.setItem(BACKUP_STORAGE_KEY, "first");
       localStorage.setItem(STORAGE_KEY, "second");
