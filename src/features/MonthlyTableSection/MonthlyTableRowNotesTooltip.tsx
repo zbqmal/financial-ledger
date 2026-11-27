@@ -14,8 +14,6 @@ const MonthlyTableNotesTooltip: React.FC<MonthlyTableNotesTooltipProps> = ({
   openEditRecord,
   deleteRecord,
 }) => {
-  console.log("==============");
-  console.log("tableRow:", tableRow);
   return (
     <div className="notes-details" role="tooltip">
       <div className="notes-details-header">

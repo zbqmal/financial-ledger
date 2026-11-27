@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo } from "react";
 import {
   YearlyComparisonGraphType,
   YearlyGraphType,
@@ -26,6 +26,8 @@ type YearlyGraphProps = {
   yearlyGraph: YearlyGraphType | null;
 };
 
+const tooltipContent = <YearlyGraphTooltip currency={currency} />;
+
 const YearlyGraph: React.FC<YearlyGraphProps> = ({
   title,
   subheader,
@@ -39,89 +41,32 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
     return null;
   }
 
-  const isComparisonGraph = Boolean(yearlyComparisonGraph);
-  const activeYearlyGraph = yearlyGraph as YearlyGraphType;
-  const comparisonGraph = yearlyComparisonGraph as Exclude<
-    YearlyComparisonGraphType,
-    null
-  >;
+  // Normalize both graph kinds into one list of series so the legend and the
+  // chart lines are built from the same data.
+  const series = yearlyComparisonGraph
+    ? yearlyComparisonGraph.lines.map((line) => ({
+        key: line.key,
+        color: line.color,
+        strokeWidth: 2.8,
+      }))
+    : (yearlyGraph as YearlyGraphType).subCategories.map(
+        (subCategory, index) => ({
+          key: subCategory,
+          color: getSubCategoryColor(
+            (yearlyGraph as YearlyGraphType).mainCategory,
+            index,
+          ),
+          strokeWidth: 2.5,
+        }),
+      );
 
-  const headerClassName = isComparisonGraph
+  const headerClassName = yearlyComparisonGraph
     ? "compare"
-    : activeYearlyGraph.type;
+    : (yearlyGraph as YearlyGraphType).type;
 
-  const graphLegend = useMemo(
-    () => {
-      if (isComparisonGraph) {
-        return comparisonGraph.lines.map((line) => (
-          <span key={line.key} className="legend-chip">
-            <span
-              className="legend-swatch"
-              style={{ backgroundColor: line.color }}
-              aria-hidden="true"
-            />
-            {line.key}
-          </span>
-        ));
-      }
-
-      return activeYearlyGraph.subCategories.map((subCategory, index) => (
-        <span key={subCategory} className="legend-chip">
-          <span
-            className="legend-swatch"
-            style={{
-              backgroundColor: getSubCategoryColor(
-                activeYearlyGraph.mainCategory,
-                index,
-              ),
-            }}
-            aria-hidden="true"
-          />
-          {subCategory}
-        </span>
-      ));
-    },
-    [activeYearlyGraph, comparisonGraph, isComparisonGraph],
-  );
-
-  const graphData = isComparisonGraph
-    ? comparisonGraph.monthlyTotals
-    : activeYearlyGraph.monthlyTotals;
-
-  const graphLine = useMemo(
-    () => {
-      if (isComparisonGraph) {
-        return comparisonGraph.lines.map((line) => (
-          <Line
-            key={line.key}
-            type="monotone"
-            dataKey={line.key}
-            stroke={line.color}
-            strokeWidth={2.8}
-            dot={{ r: 2.5, fill: line.color, strokeWidth: 0 }}
-            activeDot={{ r: 4 }}
-          />
-        ));
-      }
-
-      return activeYearlyGraph.subCategories.map((subCategory, index) => (
-        <Line
-          key={subCategory}
-          type="monotone"
-          dataKey={subCategory}
-          stroke={getSubCategoryColor(activeYearlyGraph.mainCategory, index)}
-          strokeWidth={2.5}
-          dot={{
-            r: 2.5,
-            fill: getSubCategoryColor(activeYearlyGraph.mainCategory, index),
-            strokeWidth: 0,
-          }}
-          activeDot={{ r: 4 }}
-        />
-      ));
-    },
-    [activeYearlyGraph, comparisonGraph, isComparisonGraph],
-  );
+  const graphData = yearlyComparisonGraph
+    ? yearlyComparisonGraph.monthlyTotals
+    : (yearlyGraph as YearlyGraphType).monthlyTotals;
 
   return (
     <article className="graph-card" role="listitem">
@@ -134,7 +79,16 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
       </div>
 
       <div className="graph-legend" aria-label={ariaLabelForGraphLegend}>
-        {graphLegend}
+        {series.map((line) => (
+          <span key={line.key} className="legend-chip">
+            <span
+              className="legend-swatch"
+              style={{ backgroundColor: line.color }}
+              aria-hidden="true"
+            />
+            {line.key}
+          </span>
+        ))}
       </div>
 
       <div className="chart-wrap" aria-label={ariaLabelForChartWrap}>
@@ -160,8 +114,21 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
               width={58}
               tick={{ fill: "#64748b", fontSize: 11 }}
             />
-            <Tooltip content={<YearlyGraphTooltip currency={currency} />} />
-            {graphLine}
+            <Tooltip content={tooltipContent} />
+            {series.map((line) => (
+              <Line
+                key={line.key}
+                type="monotone"
+                dataKey={line.key}
+                stroke={line.color}
+                strokeWidth={line.strokeWidth}
+                dot={{ r: 2.5, fill: line.color, strokeWidth: 0 }}
+                activeDot={{ r: 4 }}
+                // The default 1.5s draw animation replays on every data change,
+                // which made the page stutter after each saved record.
+                isAnimationActive={false}
+              />
+            ))}
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -169,4 +136,22 @@ const YearlyGraph: React.FC<YearlyGraphProps> = ({
   );
 };
 
-export default YearlyGraph;
+/**
+ * The section rebuilds every graph object whenever records change, but adding
+ * one record usually changes only one or two graphs. Compare by value so the
+ * unchanged charts skip their (expensive) re-render.
+ */
+const arePropsEqual = (
+  previous: YearlyGraphProps,
+  next: YearlyGraphProps,
+): boolean =>
+  previous.title === next.title &&
+  previous.subheader === next.subheader &&
+  previous.chipText === next.chipText &&
+  previous.ariaLabelForGraphLegend === next.ariaLabelForGraphLegend &&
+  previous.ariaLabelForChartWrap === next.ariaLabelForChartWrap &&
+  JSON.stringify(previous.yearlyComparisonGraph) ===
+    JSON.stringify(next.yearlyComparisonGraph) &&
+  JSON.stringify(previous.yearlyGraph) === JSON.stringify(next.yearlyGraph);
+
+export default memo(YearlyGraph, arePropsEqual);

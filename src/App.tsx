@@ -1,26 +1,23 @@
-import { lazy, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { getDefaultDate } from "./utils/date-utils";
 import "./App.css";
 import DataManagementSection from "./features/HeroSection/DataManagementSection";
 import toast, { Toaster } from "react-hot-toast";
 import ResetRecordsDialog from "./features/HeroSection/ResetRecordsDialog";
 import {
-  buildBackupPayload,
   isValidAmountInput,
-  loadInitialRecords,
-  sanitizeAmountInput,
+  loadStoredRecords,
+  saveRecords,
 } from "./utils/record-utils";
 import {
   FinancialRecord,
   MainCategory,
   UpdateRecordDraftType,
 } from "./types/data-types";
-import { STORAGE_KEY } from "./constants/keys";
 import IntroSection from "./features/HeroSection/IntroSection";
-import Modal from "./components/Modal/Modal";
 import MonthlyTableSectionHeader from "./features/MonthlyTableSection/MonthlyTableSectionHeader";
 import MonthlyTableFilter from "./features/MonthlyTableSection/MonthlyTableFilter";
-import UpdateRecordModal from "./features/UpdateRecordModal/UpdateRecordModal";
+import RecordFormModal from "./features/UpdateRecordModal/RecordFormModal";
 import MonthlyTable from "./features/MonthlyTableSection/MonthlyTable";
 
 const YearlyGraphsSection = lazy(
@@ -29,10 +26,32 @@ const YearlyGraphsSection = lazy(
 
 const DEFAULT_MAIN_CATEGORY = "Housing";
 
+/**
+ * Validates the draft amount and returns it as a number, or shows an error
+ * toast and returns null.
+ */
+const parseDraftAmount = (draft: UpdateRecordDraftType): number | null => {
+  if (!isValidAmountInput(draft.amount)) {
+    toast.error(
+      "Enter a valid amount. Typed digits will be formatted to 2 decimals automatically.",
+    );
+    return null;
+  }
+
+  const amount = Number.parseFloat(draft.amount);
+  if (!Number.isFinite(amount) || amount === 0) {
+    toast.error("Enter an amount other than 0.");
+    return null;
+  }
+
+  return amount;
+};
+
 export const App: React.FC = () => {
   const { defaultYear, defaultMonth } = getDefaultDate();
-  const [records, setRecords] = useState<FinancialRecord[]>(() =>
-    loadInitialRecords(),
+  const [initialLoad] = useState(loadStoredRecords);
+  const [records, setRecords] = useState<FinancialRecord[]>(
+    initialLoad.records,
   );
   const [selectedYear, setSelectedYear] = useState(defaultYear);
   const [selectedMonth, setSelectedMonth] = useState(defaultMonth);
@@ -40,103 +59,82 @@ export const App: React.FC = () => {
     useState<MainCategory>(DEFAULT_MAIN_CATEGORY);
   const [resetDialogOpen, setResetDialogOpen] = useState(false);
 
-  const [recordDraft, setRecordDraft] = useState<UpdateRecordDraftType | null>(
-    null,
-  );
-  const [isUpdateRecordModalOpen, setIsUpdateRecordModalOpen] = useState(false);
-  const [isCreatingRecord, setIsCreatingRecord] = useState(false);
+  // The draft itself lives inside RecordFormModal; App only knows which record
+  // the form was opened for.
+  const [recordFormState, setRecordFormState] = useState<{
+    draft: UpdateRecordDraftType;
+    isAddingRecord: boolean;
+  } | null>(null);
 
-  const updateSelectedYear = (year: string) => {
-    setSelectedYear(year);
-  };
-
-  const updateSelectedMonth = (month: string) => {
-    setSelectedMonth(month);
-  };
-
-  const updateSelectedMainCategory = (mainCategory: MainCategory) => {
-    setSelectedMainCategory(mainCategory);
-  };
-
-  const closeUpdateRecordModal = () => {
-    setIsUpdateRecordModalOpen(false);
-    setRecordDraft(null);
-  };
+  const closeRecordForm = () => setRecordFormState(null);
 
   const openAddRecordModal = (date: string, subCategory: string) => {
-    setIsUpdateRecordModalOpen(true);
-    setIsCreatingRecord(true);
-
-    setRecordDraft({
-      date,
-      mainCategory: selectedMainCategory,
-      subCategory,
-      amount: "",
-      note: "",
+    setRecordFormState({
+      isAddingRecord: true,
+      draft: {
+        date,
+        mainCategory: selectedMainCategory,
+        subCategory,
+        amount: "",
+        note: "",
+      },
     });
   };
 
   const openEditRecordModal = (record: FinancialRecord) => {
-    setIsUpdateRecordModalOpen(true);
-    setIsCreatingRecord(false);
-
-    setRecordDraft({
-      id: record.id,
-      date: record.date,
-      mainCategory: record.mainCategory,
-      subCategory: record.subCategory,
-      amount: record.amount.toFixed(2),
-      note: record.note,
+    setRecordFormState({
+      isAddingRecord: false,
+      draft: {
+        id: record.id,
+        date: record.date,
+        mainCategory: record.mainCategory,
+        subCategory: record.subCategory,
+        amount: record.amount.toFixed(2),
+        note: record.note,
+      },
     });
   };
 
-  const updateRecordDraft = (field: string, value: string) => {
-    setRecordDraft((previous: UpdateRecordDraftType | null) => {
-      if (!previous) return previous;
-
-      if (field === "amount") {
-        const nextAmount = sanitizeAmountInput(value);
-        if (nextAmount === null) return previous;
-
-        return { ...previous, amount: nextAmount };
-      }
-
-      return { ...previous, [field]: value };
-    });
-  };
-
-  const saveRecord = (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!recordDraft || !isValidAmountInput(recordDraft.amount)) {
-      toast.error(
-        "Enter a valid amount. Typed digits will be formatted to 2 decimals automatically.",
-      );
-      return;
-    }
-
-    const amount = Number.parseFloat(recordDraft.amount);
-
-    if (!Number.isFinite(amount) || amount === 0) {
-      toast.error("Enter an amount other than 0.");
-      return;
-    }
+  const saveRecord = (draft: UpdateRecordDraftType) => {
+    const amount = parseDraftAmount(draft);
+    if (amount === null) return;
 
     setRecords((previous) => [
       {
         id: crypto.randomUUID(),
-        date: recordDraft.date,
-        mainCategory: recordDraft.mainCategory,
-        subCategory: recordDraft.subCategory,
+        date: draft.date,
+        mainCategory: draft.mainCategory,
+        subCategory: draft.subCategory,
         amount,
-        note: recordDraft.note.trim(),
+        note: draft.note.trim(),
       },
       ...previous,
     ]);
     toast.success(
-      `${recordDraft.mainCategory} / ${recordDraft.subCategory} record saved locally.`,
+      `${draft.mainCategory} / ${draft.subCategory} record saved locally.`,
     );
 
-    closeUpdateRecordModal();
+    closeRecordForm();
+  };
+
+  const saveEditedRecord = (draft: UpdateRecordDraftType) => {
+    const amount = parseDraftAmount(draft);
+    if (amount === null) return;
+
+    setRecords((previous) =>
+      previous.map((record) =>
+        record.id === draft.id
+          ? {
+              ...record,
+              amount,
+              note: draft.note.trim(),
+            }
+          : record,
+      ),
+    );
+    toast.success("Record updated.");
+
+    closeRecordForm();
   };
 
   const deleteRecord = (recordId: string) => {
@@ -145,7 +143,7 @@ export const App: React.FC = () => {
     );
     toast.success("Record deleted.");
 
-    closeUpdateRecordModal();
+    closeRecordForm();
   };
 
   const confirmResetData = () => {
@@ -154,43 +152,26 @@ export const App: React.FC = () => {
     toast.success("All data reset.");
   };
 
-  const saveEditedRecord = (event: React.SubmitEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!recordDraft || !isValidAmountInput(recordDraft.amount)) {
+  useEffect(() => {
+    if (initialLoad.backedUpRawData) {
       toast.error(
-        "Enter a valid edited amount. Typed digits will be formatted to 2 decimals automatically.",
+        "Some saved data could not be read. A raw copy was kept in browser storage.",
+        { id: "storage-backup" },
       );
-      return;
     }
-
-    const amount = Number.parseFloat(recordDraft.amount);
-    if (!Number.isFinite(amount) || amount === 0) {
-      toast.error("Enter an amount other than 0.");
-      return;
-    }
-
-    setRecords((previous) =>
-      previous.map((record) =>
-        record.id === recordDraft.id
-          ? {
-              ...record,
-              amount,
-              note: recordDraft.note.trim(),
-            }
-          : record,
-      ),
-    );
-    toast.success("Record updated.");
-
-    closeUpdateRecordModal();
-  };
+  }, [initialLoad]);
 
   useEffect(() => {
-    localStorage.setItem(
-      STORAGE_KEY,
-      JSON.stringify(buildBackupPayload(records)),
-    );
-  }, [records]);
+    // The records were just read from storage. Writing them straight back
+    // could overwrite data that failed to load, so only save real changes.
+    if (records === initialLoad.records) return;
+
+    if (!saveRecords(records)) {
+      toast.error(
+        "Could not save to browser storage. Export a backup to keep your data.",
+      );
+    }
+  }, [records, initialLoad]);
 
   return (
     <main className="app-shell">
@@ -205,7 +186,15 @@ export const App: React.FC = () => {
         />
       </section>
 
-      <YearlyGraphsSection records={records} />
+      <Suspense
+        fallback={
+          <section className="card graph-section">
+            <p className="empty-state">Loading graphs…</p>
+          </section>
+        }
+      >
+        <YearlyGraphsSection records={records} />
+      </Suspense>
 
       <article className="card table-card">
         <MonthlyTableSectionHeader />
@@ -214,9 +203,9 @@ export const App: React.FC = () => {
           selectedYear={selectedYear}
           selectedMonth={selectedMonth}
           selectedMainCategory={selectedMainCategory}
-          updateSelectedYear={updateSelectedYear}
-          updateSelectedMonth={updateSelectedMonth}
-          updateSelectedMainCategory={updateSelectedMainCategory}
+          updateSelectedYear={setSelectedYear}
+          updateSelectedMonth={setSelectedMonth}
+          updateSelectedMainCategory={setSelectedMainCategory}
         />
 
         {selectedYear ? (
@@ -243,28 +232,15 @@ export const App: React.FC = () => {
         />
       )}
 
-      {isUpdateRecordModalOpen ? (
-        isCreatingRecord ? (
-          <Modal title="Add Record" onClose={() => closeUpdateRecordModal()}>
-            <UpdateRecordModal
-              record={recordDraft}
-              isAddingRecord={true}
-              onSubmit={saveRecord}
-              updateRecordDraft={updateRecordDraft}
-              closeModal={() => closeUpdateRecordModal()}
-            />
-          </Modal>
-        ) : (
-          <Modal title="Add Record" onClose={() => closeUpdateRecordModal()}>
-            <UpdateRecordModal
-              record={recordDraft}
-              isAddingRecord={false}
-              onSubmit={saveEditedRecord}
-              updateRecordDraft={updateRecordDraft}
-              closeModal={() => closeUpdateRecordModal()}
-            />
-          </Modal>
-        )
+      {recordFormState ? (
+        <RecordFormModal
+          initialDraft={recordFormState.draft}
+          isAddingRecord={recordFormState.isAddingRecord}
+          onSubmit={
+            recordFormState.isAddingRecord ? saveRecord : saveEditedRecord
+          }
+          onClose={closeRecordForm}
+        />
       ) : null}
     </main>
   );

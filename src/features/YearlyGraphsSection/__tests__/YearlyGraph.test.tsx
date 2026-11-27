@@ -91,3 +91,37 @@ describe("YearlyGraph", () => {
     expect(screen.getByTestId("line-Bonus")).toBeInTheDocument();
   });
 });
+
+describe("YearlyGraph memoization", () => {
+  const baseProps = {
+    title: "Eat",
+    subheader: "$10.00",
+    chipText: "expense",
+    ariaLabelForGraphLegend: "legend",
+    ariaLabelForChartWrap: "chart",
+    yearlyComparisonGraph: null,
+  };
+  const makeGraph = (mart: number) => ({
+    mainCategory: "Eat" as const,
+    type: "expense",
+    subCategories: ["Mart"],
+    monthlyTotals: [{ month: "Jan", Mart: mart }],
+    subCategoryTotals: { Mart: mart },
+    yearlyTotal: mart,
+  });
+
+  it("skips re-rendering when graph data is equal by value", () => {
+    const { rerender, getByTestId } = render(
+      <YearlyGraph {...baseProps} yearlyGraph={makeGraph(10)} />,
+    );
+    const firstLine = getByTestId("line-Mart");
+
+    rerender(<YearlyGraph {...baseProps} yearlyGraph={makeGraph(10)} />);
+    expect(getByTestId("line-Mart")).toBe(firstLine);
+
+    rerender(
+      <YearlyGraph {...baseProps} subheader="$20.00" yearlyGraph={makeGraph(20)} />,
+    );
+    expect(screen.getByText("$20.00")).toBeInTheDocument();
+  });
+});
