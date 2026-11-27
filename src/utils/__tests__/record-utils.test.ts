@@ -2,8 +2,11 @@ import {
   buildBackupPayload,
   getSubCategoryOptions,
   isValidAmountInput,
+  BACKUP_STORAGE_KEY,
   loadInitialRecords,
+  loadStoredRecords,
   parseRecords,
+  saveRecords,
   sanitizeAmountInput,
   truncateText,
 } from "../record-utils";
@@ -131,5 +134,96 @@ describe("record-utils", () => {
     };
 
     expect(parseRecords(payload as any)).toEqual([]);
+  });
+
+  it("keeps records with a missing note or id instead of dropping them", () => {
+    const payload = {
+      version: 2,
+      exportedAt: "x",
+      records: [
+        [null, "2025-01-01", "Income", "Salary", 10, null],
+        ["id-2", "2025-01-02", "Eat", "Mart", "-5.00", undefined],
+      ],
+    };
+
+    const parsed = parseRecords(payload as any);
+    expect(parsed).toHaveLength(2);
+    expect(parsed[0].note).toBe("");
+    expect(typeof parsed[0].id).toBe("string");
+    expect(parsed[0].id).not.toBe("");
+    expect(parsed[1]).toMatchObject({ id: "id-2", amount: -5, note: "" });
+  });
+
+  describe("loadStoredRecords", () => {
+    beforeEach(() => localStorage.clear());
+
+    it("does not back up data that loads cleanly", () => {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(validPayload));
+
+      expect(loadStoredRecords()).toMatchObject({ backedUpRawData: false });
+      expect(localStorage.getItem(BACKUP_STORAGE_KEY)).toBeNull();
+    });
+
+    it("backs up unreadable data before the app can overwrite it", () => {
+      localStorage.setItem(STORAGE_KEY, "not-json");
+
+      expect(loadStoredRecords()).toEqual({
+        records: [],
+        backedUpRawData: true,
+      });
+      expect(localStorage.getItem(BACKUP_STORAGE_KEY)).toBe("not-json");
+    });
+
+    it("backs up when some records had to be dropped", () => {
+      const raw = JSON.stringify({
+        ...validPayload,
+        records: [...validPayload.records, ["id-3", "bad-date"]],
+      });
+      localStorage.setItem(STORAGE_KEY, raw);
+
+      const result = loadStoredRecords();
+      expect(result.records).toHaveLength(2);
+      expect(result.backedUpRawData).toBe(true);
+      expect(localStorage.getItem(BACKUP_STORAGE_KEY)).toBe(raw);
+    });
+
+    it("never overwrites an existing backup", () => {
+      localStorage.setItem(BACKUP_STORAGE_KEY, "first");
+      localStorage.setItem(STORAGE_KEY, "second");
+
+      loadStoredRecords();
+      expect(localStorage.getItem(BACKUP_STORAGE_KEY)).toBe("first");
+    });
+  });
+
+  describe("saveRecords", () => {
+    it("writes the backup payload", () => {
+      expect(
+        saveRecords([
+          {
+            id: "id-1",
+            date: "2025-01-01",
+            mainCategory: "Income",
+            subCategory: "Salary",
+            amount: 1,
+            note: "",
+          },
+        ]),
+      ).toBe(true);
+      expect(JSON.parse(localStorage.getItem(STORAGE_KEY)!).records).toEqual([
+        ["id-1", "2025-01-01", "Income", "Salary", 1, ""],
+      ]);
+    });
+
+    it("returns false when storage rejects the write", () => {
+      const spy = jest
+        .spyOn(Storage.prototype, "setItem")
+        .mockImplementation(() => {
+          throw new Error("QuotaExceededError");
+        });
+
+      expect(saveRecords([])).toBe(false);
+      spy.mockRestore();
+    });
   });
 });

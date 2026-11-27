@@ -6,7 +6,6 @@ import { STORAGE_KEY } from "../constants/keys";
 import {
   FinancialDataType,
   FinancialRecord,
-  FinancialRecordTuple,
   MainCategory,
 } from "../types/data-types";
 
@@ -23,13 +22,69 @@ export const buildBackupPayload = (records: FinancialRecord[]) => ({
   ]),
 });
 
-export const loadInitialRecords = (): FinancialRecord[] => {
+export const BACKUP_STORAGE_KEY = `${STORAGE_KEY}-unreadable-backup`;
+
+/**
+ * Reads records from localStorage.
+ *
+ * If the stored data cannot be parsed, or some records had to be dropped, the
+ * raw stored string is copied to BACKUP_STORAGE_KEY first, so the next save
+ * cannot silently destroy data the app failed to read.
+ */
+export const loadStoredRecords = (): {
+  records: FinancialRecord[];
+  backedUpRawData: boolean;
+} => {
+  let saved: string | null = null;
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
-    if (!saved) return [];
-    return parseRecords(JSON.parse(saved));
+    saved = localStorage.getItem(STORAGE_KEY);
   } catch {
-    return [];
+    return { records: [], backedUpRawData: false };
+  }
+  if (!saved) return { records: [], backedUpRawData: false };
+
+  let records: FinancialRecord[] = [];
+  let lostData = false;
+  try {
+    const payload = JSON.parse(saved);
+    records = parseRecords(payload);
+    const storedCount = Array.isArray(payload?.records)
+      ? payload.records.length
+      : 0;
+    lostData = records.length < storedCount || !Array.isArray(payload?.records);
+  } catch {
+    lostData = true;
+  }
+
+  if (!lostData) return { records, backedUpRawData: false };
+
+  try {
+    // Never overwrite an earlier backup; it may hold the only good copy.
+    if (!localStorage.getItem(BACKUP_STORAGE_KEY)) {
+      localStorage.setItem(BACKUP_STORAGE_KEY, saved);
+    }
+    return { records, backedUpRawData: true };
+  } catch {
+    return { records, backedUpRawData: false };
+  }
+};
+
+export const loadInitialRecords = (): FinancialRecord[] =>
+  loadStoredRecords().records;
+
+/**
+ * Writes records to localStorage. Returns false instead of throwing when the
+ * browser refuses the write (for example, when the storage quota is full).
+ */
+export const saveRecords = (records: FinancialRecord[]): boolean => {
+  try {
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(buildBackupPayload(records)),
+    );
+    return true;
+  } catch {
+    return false;
   }
 };
 
@@ -49,44 +104,34 @@ export const parseRecords = (
     .filter((record): record is FinancialRecord => record !== null);
 };
 
-const normalizeRecord = (
-  record: FinancialRecordTuple,
-): FinancialRecord | null => {
-  if (record.length < 6) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(record[1])) return null;
+const normalizeRecord = (record: unknown): FinancialRecord | null => {
+  if (!Array.isArray(record) || record.length < 6) return null;
 
-  const source = {
-    id: record[0],
-    date: record[1],
-    mainCategory: record[2],
-    subCategory: record[3],
-    amount: record[4],
-    note: record[5],
-  };
+  const [id, date, mainCategory, subCategory, rawAmount, note] = record;
 
-  let mainCategory = null;
-  let subCategory = null;
-
+  if (typeof date !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return null;
+  }
   if (
-    isValidMainCategory(source.mainCategory) &&
-    isValidSubCategory(source.mainCategory, source.subCategory)
+    !isValidMainCategory(mainCategory) ||
+    typeof subCategory !== "string" ||
+    !isValidSubCategory(mainCategory, subCategory)
   ) {
-    mainCategory = source.mainCategory;
-    subCategory = source.subCategory;
-  } else {
     return null;
   }
 
-  const amount = Number.parseFloat(source.amount);
+  const amount =
+    typeof rawAmount === "number" ? rawAmount : Number.parseFloat(rawAmount);
   if (!Number.isFinite(amount) || amount === 0) return null;
 
   return {
-    id: source.id,
-    date: source.date,
+    // A missing id or note should not cost the user the whole record.
+    id: typeof id === "string" && id ? id : crypto.randomUUID(),
+    date,
     mainCategory,
     subCategory,
     amount,
-    note: source.note.trim(),
+    note: typeof note === "string" ? note.trim() : "",
   };
 };
 

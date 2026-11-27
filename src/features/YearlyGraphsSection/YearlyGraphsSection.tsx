@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { memo, useDeferredValue, useMemo, useState } from "react";
 import YearlyGraphsSectionHeader from "./YearlyGraphSectionHeader";
 import { FinancialRecord } from "../../types/data-types";
 import { MONTH_OPTIONS } from "../../constants/dates";
@@ -15,8 +15,12 @@ type YearlyGraphsSectionProps = {
 };
 
 const YearlyGraphsSection: React.FC<YearlyGraphsSectionProps> = ({
-  records,
+  records: latestRecords,
 }) => {
+  // Chart updates are the most expensive part of saving a record. Deferring
+  // them lets the modal close and the table update first; the charts catch up
+  // in a non-blocking background render.
+  const records = useDeferredValue(latestRecords);
   const [selectedYear, setSelectedYear] = useState<string>(
     new Date().getFullYear().toString(),
   );
@@ -159,4 +163,4 @@ const YearlyGraphsSection: React.FC<YearlyGraphsSectionProps> = ({
   );
 };
 
-export default YearlyGraphsSection;
+export default memo(YearlyGraphsSection);
